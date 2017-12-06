@@ -26,23 +26,20 @@ class TestData(unittest.TestCase):
         self.opt = opt
 
     def dataset_build(self, opt):
-        fields = onmt.IO.get_fields(0, 0)
+        fields = onmt.IO.ONMTDataset.get_fields()
 
-        train = onmt.IO.ONMTDataset(
-            opt.train_src, opt.train_tgt, fields,
-            opt.src_seq_length, opt.tgt_seq_length,
-            src_seq_length_trunc=opt.src_seq_length_trunc,
-            tgt_seq_length_trunc=opt.tgt_seq_length_trunc,
-            dynamic_dict=opt.dynamic_dict)
+        train = onmt.IO.ONMTDataset(opt.train_src,
+                                    opt.train_tgt,
+                                    fields,
+                                    opt)
 
-        onmt.IO.build_vocab(train, opt)
+        onmt.IO.ONMTDataset.build_vocab(train,
+                                        opt)
 
-        onmt.IO.ONMTDataset(
-            opt.valid_src, opt.valid_tgt, fields,
-            opt.src_seq_length, opt.tgt_seq_length,
-            src_seq_length_trunc=opt.src_seq_length_trunc,
-            tgt_seq_length_trunc=opt.tgt_seq_length_trunc,
-            dynamic_dict=opt.dynamic_dict)
+        onmt.IO.ONMTDataset(opt.valid_src,
+                            opt.valid_tgt,
+                            fields,
+                            opt)
 
     def test_merge_vocab(self):
         va = torchtext.vocab.Vocab(Counter('abbccc'))

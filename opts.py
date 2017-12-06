@@ -70,7 +70,7 @@ def model_opts(parser):
     # parser.add_argument('-residual',   action="store_true",
     #                     help="Add residual connections between RNN layers.")
 
-    parser.add_argument('-brnn', action=DeprecateAction,
+    parser.add_argument('-brnn', action="store_true",
                         help="Deprecated, use `encoder_type`.")
     parser.add_argument('-brnn_merge', default='concat',
                         choices=['concat', 'sum'],
@@ -113,7 +113,7 @@ def preprocess_opts(parser):
                         help="Maximum source sequence length")
     parser.add_argument('-src_seq_length_trunc', type=int, default=0,
                         help="Truncate source sequence length.")
-    parser.add_argument('-tgt_seq_length', type=int, default=50,
+    parser.add_argument('-tgt_seq_length', type=int, default=100,
                         help="Maximum target sequence length to keep.")
     parser.add_argument('-tgt_seq_length_trunc', type=int, default=0,
                         help="Truncate target sequence length.")
@@ -131,6 +131,8 @@ def preprocess_opts(parser):
 
 
 def train_opts(parser):
+    # distribution of train dataset
+    parser.add_argument('-prob', type=str, default='data/generate_prob.pkl')
     # Model loading/saving options
     parser.add_argument('-data', required=True,
                         help="""Path prefix to the ".train.pt" and
@@ -176,6 +178,8 @@ def train_opts(parser):
                         help="Fix word embeddings on the encoder side.")
 
     # Optimization options
+    parser.add_argument('-topK', type=int, default=5,
+                        help='topK of ensemble distribution')
     parser.add_argument('-batch_size', type=int, default=64,
                         help='Maximum batch size')
     parser.add_argument('-max_generator_batches', type=int, default=32,
@@ -197,7 +201,8 @@ def train_opts(parser):
                         help="""Truncated bptt.""")
     # learning rate
     parser.add_argument('-learning_rate', type=float, default=1.0,
-                        help="""Starting learning rate.
+                        help="""Starting learning rate. If adagrad/adadelta/adam
+                        is used, then this is the global learning rate.
                         Recommended settings: sgd = 1, adagrad = 0.1,
                         adadelta = 1, adam = 0.001""")
     parser.add_argument('-learning_rate_decay', type=float, default=0.5,
@@ -331,14 +336,3 @@ class MarkdownHelpAction(argparse.Action):
         parser.formatter_class = MarkdownHelpFormatter
         parser.print_help()
         parser.exit()
-
-
-class DeprecateAction(argparse.Action):
-    def __init__(self, option_strings, dest, help=None, **kwargs):
-        super(DeprecateAction, self).__init__(option_strings, dest, nargs=0,
-                                              help=help, **kwargs)
-
-    def __call__(self, parser, namespace, values, flag_name):
-        help = self.help if self.help is not None else ""
-        msg = "Flag '%s' is deprecated. %s" % (flag_name, help)
-        raise argparse.ArgumentTypeError(msg)

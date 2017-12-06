@@ -67,7 +67,7 @@ class Statistics(object):
 class Trainer(object):
     def __init__(self, model, train_iter, valid_iter,
                  train_loss, valid_loss, optim,
-                 trunc_size, shard_size):
+                 trunc_size, shard_size, topK):
         """
         Args:
             model: the seq2seq model.
@@ -88,41 +88,38 @@ class Trainer(object):
         self.optim = optim
         self.trunc_size = trunc_size
         self.shard_size = shard_size
-
+        self.topK = topK
         # Set model in training mode.
         self.model.train()
 
-    def train(self, epoch, report_func=None):
+    def train(self, epoch, fields, report_func=None):
         """ Called for each epoch to train. """
         total_stats = Statistics()
         report_stats = Statistics()
-
         for i, batch in enumerate(self.train_iter):
             target_size = batch.tgt.size(0)
             # Truncated BPTT
             trunc_size = self.trunc_size if self.trunc_size else target_size
-
+            
             dec_state = None
             _, src_lengths = batch.src
-
+            
             src = onmt.IO.make_features(batch, 'src')
             tgt_outer = onmt.IO.make_features(batch, 'tgt')
             report_stats.n_src_words += src_lengths.sum()
-
+            
             for j in range(0, target_size-1, trunc_size):
                 # 1. Create truncated target.
                 tgt = tgt_outer[j: j + trunc_size]
-
                 # 2. F-prop all but generator.
                 self.model.zero_grad()
                 outputs, attns, dec_state = \
                     self.model(src, tgt, src_lengths, dec_state)
-
                 # 3. Compute loss in shards for memory efficiency.
                 batch_stats = self.train_loss.sharded_compute_loss(
                         batch, outputs, attns, j,
                         trunc_size, self.shard_size)
-
+                #batch_stats = self.train_loss.cross_entropy_loss(batch, outputs, j, trunc_size, self.topK)
                 # 4. Update the parameters and statistics.
                 self.optim.step()
                 total_stats.update(batch_stats)
@@ -131,12 +128,43 @@ class Trainer(object):
                 # If truncated, don't backprop fully.
                 if dec_state is not None:
                     dec_state.detach()
+                
+            if report_func is not None:
+                report_stats = report_func(
+                        epoch, i, len(self.train_iter),
+                        total_stats.start_time, self.optim.lr, report_stats)
+        return total_stats
+
+    def distill(self, epoch, fields, batch_prob, report_func=None):
+        """ Called for each epoch to train. """
+        total_stats = Statistics()
+        report_stats = Statistics()
+        
+        src_vocab = fields['src'].vocab
+        
+        for i, batch in enumerate(self.train_iter):
+            target_size, batch_size = batch.tgt.size()
+
+            dec_state = None
+            _, src_lengths = batch.src
+            src = onmt.IO.make_features(batch, 'src')
+            tgt_outer = onmt.IO.make_features(batch, 'tgt')
+            report_stats.n_src_words += src_lengths.sum()
+            # 2. F-prop all but generator.
+            self.model.zero_grad()
+            outputs, attns, dec_state = \
+                self.model(src, tgt_outer, src_lengths, dec_state)
+            # 3. Compute loss
+            batch_stats = self.train_loss.cross_entropy_loss(batch, outputs, self.topK, *batch_prob[i])
+            # 4. Update the parameters and statistics.
+            self.optim.step()
+            total_stats.update(batch_stats)
+            report_stats.update(batch_stats)
 
             if report_func is not None:
                 report_stats = report_func(
                         epoch, i, len(self.train_iter),
                         total_stats.start_time, self.optim.lr, report_stats)
-
         return total_stats
 
     def validate(self):
@@ -186,12 +214,10 @@ class Trainer(object):
         checkpoint = {
             'model': model_state_dict,
             'generator': generator_state_dict,
-            'vocab': onmt.IO.save_vocab(fields),
+            'vocab': onmt.IO.ONMTDataset.save_vocab(fields),
             'opt': opt,
             'epoch': epoch,
             'optim': self.optim
         }
         torch.save(checkpoint,
-                   '%s_acc_%.2f_ppl_%.2f_e%d.pt'
-                   % (opt.save_model, valid_stats.accuracy(),
-                      valid_stats.ppl(), epoch))
+                '%s.pt' % (opt.save_model))

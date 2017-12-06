@@ -8,7 +8,7 @@ from __future__ import division
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-
+import torch.nn.functional as F
 import onmt
 
 
@@ -68,14 +68,14 @@ class LossComputeBase(nn.Module):
         batch_stats = onmt.Statistics()
         range_ = (cur_trunc, cur_trunc + trunc_size)
         shard_state = self.make_shard_state(batch, output, range_, attns)
-
+        
         for shard in shards(shard_state, shard_size):
             loss, stats = self.compute_loss(batch, **shard)
             loss.div(batch.batch_size).backward()
             batch_stats.update(stats)
 
         return batch_stats
-
+    
     def stats(self, loss, scores, target):
         """
         Compute and return a Statistics object.
@@ -108,7 +108,6 @@ class NMTLossCompute(LossComputeBase):
         weight = torch.ones(len(tgt_vocab))
         weight[self.padding_idx] = 0
         self.criterion = nn.NLLLoss(weight, size_average=False)
-
     def make_shard_state(self, batch, output, range_, attns=None):
         """ See base class for args description. """
         return {
@@ -119,16 +118,39 @@ class NMTLossCompute(LossComputeBase):
     def compute_loss(self, batch, output, target):
         """ See base class for args description. """
         scores = self.generator(self.bottle(output))
+        scores_data = scores.data.clone()
 
         target = target.view(-1)
+        target_data = target.data.clone()
 
         loss = self.criterion(scores, target)
         loss_data = loss.data.clone()
 
-        stats = self.stats(loss_data, scores.data, target.data)
+        stats = self.stats(loss_data, scores_data, target_data)
 
         return loss, stats
+    
+    def cross_entropy_loss(self, batch, output, topK, weights, targets):
 
+        batch_stats = onmt.Statistics()
+
+        scores = self.generator(self.bottle(output))
+        scores_data = scores.data.clone()
+        target = batch.tgt[1:]
+        target = target.view(-1)
+        target_data = target.data.clone()
+        
+        NLLLoss = self.criterion(scores, target)
+        loss_data = NLLLoss.div(batch.batch_size).data.clone()
+        stats = self.stats(loss_data, scores_data, target_data)
+        batch_stats.update(stats)
+        
+        scores = torch.cat(tuple(scores for _ in range(topK)), dim=0).unsqueeze(0) * weights.unsqueeze(-1)
+        scores = scores.squeeze(0)
+        cross_entropy_loss = self.criterion(scores,targets) 
+        cross_entropy_loss.div(batch.batch_size).backward()
+
+        return batch_stats
 
 def filter_shard_state(state):
     for k, v in state.items():
@@ -160,7 +182,6 @@ def shards(state, shard_size, eval=False):
         # non_none: the subdict of the state dictionary where the values
         # are not None.
         non_none = dict(filter_shard_state(state))
-
         # Now, the iteration:
         # state is a dictionary of sequences of tensor-like but we
         # want a sequence of dictionaries of tensors.
@@ -168,7 +189,6 @@ def shards(state, shard_size, eval=False):
         # sequence of tensor-like sequences.
         keys, values = zip(*((k, torch.split(v, shard_size))
                              for k, v in non_none.items()))
-
         # Now, yield a dictionary for each shard. The keys are always
         # the same. values is a sequence of length #keys where each
         # element is a sequence of length #shards. We want to iterate

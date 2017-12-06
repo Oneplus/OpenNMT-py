@@ -197,11 +197,11 @@ class RNNDecoderBase(nn.Module):
         return h
 
     def init_decoder_state(self, src, context, enc_hidden):
-        if isinstance(enc_hidden, tuple):  # LSTM
+        if isinstance(enc_hidden, tuple):  # GRU
             return RNNDecoderState(context, self.hidden_size,
                                    tuple([self._fix_enc_hidden(enc_hidden[i])
                                          for i in range(len(enc_hidden))]))
-        else:  # GRU
+        else:  # LSTM
             return RNNDecoderState(context, self.hidden_size,
                                    self._fix_enc_hidden(enc_hidden))
 
@@ -242,10 +242,7 @@ class StdRNNDecoder(RNNDecoderBase):
         emb = self.embeddings(input)
 
         # Run the forward pass of the RNN.
-        if isinstance(self.rnn, nn.GRU):
-            rnn_output, hidden = self.rnn(emb, state.hidden[0])
-        else:
-            rnn_output, hidden = self.rnn(emb, state.hidden)
+        rnn_output, hidden = self.rnn(emb, state.hidden)
         # Result Check
         input_len, input_batch, _ = input.size()
         output_len, output_batch, _ = rnn_output.size()

@@ -15,7 +15,7 @@ class Translator(object):
         self.opt = opt
         checkpoint = torch.load(opt.model,
                                 map_location=lambda storage, loc: storage)
-        self.fields = onmt.IO.load_fields(checkpoint['vocab'])
+        self.fields = onmt.IO.ONMTDataset.load_fields(checkpoint['vocab'])
 
         model_opt = checkpoint['opt']
         for arg in dummy_opt:
@@ -143,7 +143,6 @@ class Translator(object):
             # Temporary kludge solution to handle changed dim expectation
             # in the decoder
             inp = inp.unsqueeze(2)
-
             # Run one step.
             decOut, decStates, attn = \
                 self.model.decoder(inp, context, decStates)
@@ -220,4 +219,135 @@ class Translator(object):
                 goldBatch.append(
                     self.buildTargetTokens(tgt[1:, b], src[:, b],
                                            None, None))
+
         return predBatch, goldBatch, predScore, goldScore, attn, src
+    
+    def init_decoder_state(self, batch, dataset):
+        beam_size = self.opt.beam_size
+        batch_size = batch.batch_size
+
+        # (1) Run the encoder on the src.
+        _, src_lengths = batch.src
+        src = onmt.IO.make_features(batch, 'src')
+        encStates, context = self.model.encoder(src, src_lengths)
+        decStates = self.model.decoder.init_decoder_state(
+                                        src, context, encStates)
+        #  (1b) Initialize for the decoder.
+        def var(a): return Variable(a, volatile=True)
+
+        def rvar(a): return var(a.repeat(1, beam_size, 1))
+
+        # Repeat everything beam_size times.
+        context = rvar(context.data)
+        src = rvar(src.data)
+        decStates.repeat_beam_size_times(beam_size)
+        
+        return context, decStates
+
+    def translateSingle(self, batch, dataset):
+        beam_size = self.opt.beam_size
+        batch_size = batch.batch_size
+
+        # (1) Run the encoder on the src.
+        _, src_lengths = batch.src
+        src = onmt.IO.make_features(batch, 'src')
+        encStates, context = self.model.encoder(src, src_lengths)
+        decStates = self.model.decoder.init_decoder_state(
+                                        src, context, encStates)
+        #  (1b) Initialize for the decoder.
+        def var(a): return Variable(a, volatile=True)
+
+        def rvar(a): return var(a.repeat(1, beam_size, 1))
+
+        # Repeat everything beam_size times.
+        context = rvar(context.data)
+        src = rvar(src.data)
+        decStates.repeat_beam_size_times(beam_size)
+        scorer = None
+        # (2) run the decoder to generate sentences, using beam search.
+
+        beam = [onmt.Beam(beam_size, n_best=self.opt.n_best,
+                          cuda=self.opt.cuda,
+                          vocab=self.fields["tgt"].vocab,
+                          global_scorer=scorer)
+                for __ in range(batch_size)]
+
+        def bottle(m):
+            return m.view(batch_size * beam_size, -1)
+
+        def unbottle(m):
+            return m.view(beam_size, batch_size, -1)
+
+        for i in range(self.opt.max_sent_length):
+
+            if all((b.done() for b in beam)):
+                break
+
+            # Construct batch x beam_size nxt words.
+            # Get all the pending current beam words and arrange for forward.
+            inp = var(torch.stack([b.getCurrentState() for b in beam])
+                      .t().contiguous().view(1, -1))
+            # Temporary kludge solution to handle changed dim expectation
+            # in the decoder
+            inp = inp.unsqueeze(2)
+            # Run one step.
+            decOut, decStates, attn = \
+                self.model.decoder(inp, context, decStates)
+            decOut = decOut.squeeze(0)
+            # decOut: beam x rnn_size
+                
+            # (b) Compute a vector of batch*beam word scores.
+            out = self.model.generator.forward(decOut).data
+            out = unbottle(out)
+            # beam x batch x tgt_vocab
+     
+            # (c) Advance each beam.
+            for j, b in enumerate(beam):
+                b.advance(out[:, j],  unbottle(attn["std"]).data[:, j])
+                decStates.beam_update(j, b.getCurrentOrigin(), beam_size)
+        vocab = self.fields['tgt'].vocab
+        for i in range(len(vocab)):
+            print self.fields['tgt'].vocab.itos[i]
+            
+    def step(self, input, context, decStates):
+        #  (1) convert words to indexes
+        beam_size = 1
+        batch_size = 1
+
+        def bottle(m):
+            return m.view(batch_size * beam_size, -1)
+
+        def unbottle(m):
+            return m.view(beam_size, batch_size, -1)
+
+        # Run one step.
+        decOut, decStates, attn = \
+            self.model.decoder(input, context, decStates)
+        decOut = decOut.squeeze(0)
+        # decOut: beam x rnn_size
+            
+        # (b) Compute a vector of batch*beam word scores.
+        out = self.model.generator.forward(decOut).data
+        out = torch.exp(unbottle(out))
+        return out, decStates
+        #  (2) translate
+        #pred, predScore, attn, goldScore = self.translateSingle(batch, data)
+        #self.translateSingle(batch, data)
+        #assert(len(goldScore) == len(pred))
+        #pred, predScore, attn, goldScore, i = list(zip(
+        #    *sorted(zip(pred, predScore, attn, goldScore,
+        #                batch.indices.data),
+        #            key=lambda x: x[-1])))
+        #inds, perm = torch.sort(batch.indices.data)
+
+        ##  (3) convert indexes to words
+        #predBatch, goldBatch = []
+        #src = batch.src[0].data.index_select(1, perm)
+        #for b in range(batch_size):
+        #    src_vocab = data.src_vocabs[inds[b]]
+        #    predBatch.append(
+        #        [self.buildTargetTokens(pred[b][n], src[:, b],
+        #                                attn[b][n], src_vocab)
+        #         for n in range(self.opt.n_best)])
+        #
+        #return predBatch, predScore, goldScore, attn, src

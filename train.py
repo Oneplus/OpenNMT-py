@@ -1,12 +1,14 @@
-#!/usr/bin/env python
+#coding:utf8
 
 from __future__ import division
 
 import os
 import sys
 import argparse
+import cPickle as pkl
 import torch
 import torch.nn as nn
+from torch.autograd import Variable
 from torch import cuda
 
 import onmt
@@ -16,9 +18,7 @@ import onmt.modules
 from onmt.Utils import aeq, use_gpu
 import opts
 
-parser = argparse.ArgumentParser(
-    description='train.py',
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser = argparse.ArgumentParser(description='train.py')
 
 # opts.py
 opts.add_md_help_argument(parser)
@@ -100,7 +100,7 @@ def make_train_data_iter(train_data, opt):
     """
     return onmt.IO.OrderedIterator(
                 dataset=train_data, batch_size=opt.batch_size,
-                device=opt.gpuid[0] if opt.gpuid else -1,
+                device=opt.gpuid[0] if opt.gpuid else -1,train = True, sort = True, shuffle = False,
                 repeat=False)
 
 
@@ -134,12 +134,49 @@ def make_loss_compute(model, tgt_vocab, dataset, opt):
 
     return compute
 
+def ivar(v):
+    return Variable(torch.LongTensor(v)).cuda()
+def fvar(v):
+    return Variable(torch.FloatTensor(v)).cuda()
 
+def get_sorted_prob(train_data, prob):
+    src_lengths = [len(src_data) for src_data in train_data.src]
+    _, sorted_prob = map(list,zip(*sorted(map(list,zip(src_lengths,prob)),key=lambda x:-x[0])))
+    
+    batch_probs = []
+    start, batch_size, total = 0, opt.batch_size, len(sorted_prob)
+    while start < total:
+        if start + batch_size <= total: 
+            batch_prob = sorted_prob[start : start + batch_size]
+        else:
+            batch_prob = sorted_prob[start:]
+        start += batch_size
+
+        BLANK = [[0.0 for _ in range(opt.topK)],[1 for _ in range(opt.topK)]]
+        
+        max_len = max(len(ex) for ex in batch_prob)
+        step = len(batch_prob)
+        
+        for i in range(step):
+            batch_prob[i] += [BLANK for _ in range(max_len - len(batch_prob[i]))]
+        
+        weights = []
+        targets = []
+
+        for i in range(opt.topK):
+            for j in range(max_len):
+                for k in range(step):
+                    weights.append(batch_prob[k][j][0][i])
+                    targets.append(batch_prob[k][j][1][i])
+    
+        batch_probs.append((fvar(weights),ivar(targets)))
+    return batch_probs
 def train_model(model, train_data, valid_data, fields, optim):
-
+    
+    min_ppl = float('inf')
+    
     train_iter = make_train_data_iter(train_data, opt)
     valid_iter = make_valid_data_iter(valid_data, opt)
-
     train_loss = make_loss_compute(model, fields["tgt"].vocab,
                                    train_data, opt)
     valid_loss = make_loss_compute(model, fields["tgt"].vocab,
@@ -150,13 +187,14 @@ def train_model(model, train_data, valid_data, fields, optim):
 
     trainer = onmt.Trainer(model, train_iter, valid_iter,
                            train_loss, valid_loss, optim,
-                           trunc_size, shard_size)
-
+                           trunc_size, shard_size, opt.topK)
+    
+    batch_prob = get_sorted_prob(train_data, pkl.load(open(opt.prob)))
     for epoch in range(opt.start_epoch, opt.epochs + 1):
         print('')
-
         # 1. Train for one epoch on the training set.
-        train_stats = trainer.train(epoch, report_func)
+        #train_stats = trainer.train(epoch, fields, report_func)
+        train_stats = trainer.distill(epoch, fields, batch_prob, report_func)
         print('Train perplexity: %g' % train_stats.ppl())
         print('Train accuracy: %g' % train_stats.accuracy())
 
@@ -174,8 +212,9 @@ def train_model(model, train_data, valid_data, fields, optim):
         trainer.epoch_step(valid_stats.ppl(), epoch)
 
         # 5. Drop a checkpoint if needed.
-        if epoch >= opt.start_checkpoint_at:
+        if epoch >= opt.start_checkpoint_at and valid_stats.ppl() < min_ppl:
             trainer.drop_checkpoint(opt, epoch, fields, valid_stats)
+            min_ppl = valid_stats.ppl()
 
 
 def check_save_model_path():
@@ -200,7 +239,7 @@ def tally_parameters(model):
 
 
 def load_fields(train, valid, checkpoint):
-    fields = onmt.IO.load_fields(
+    fields = onmt.IO.ONMTDataset.load_fields(
                 torch.load(opt.data + '.vocab.pt'))
     fields = dict([(k, f) for (k, f) in fields.items()
                   if k in train.examples[0].__dict__])
@@ -209,7 +248,7 @@ def load_fields(train, valid, checkpoint):
 
     if opt.train_from:
         print('Loading vocab from checkpoint at %s.' % opt.train_from)
-        fields = onmt.IO.load_fields(checkpoint['vocab'])
+        fields = onmt.IO.ONMTDataset.load_fields(checkpoint['vocab'])
 
     print(' * vocabulary size. source = %d; target = %d' %
           (len(fields['src'].vocab), len(fields['tgt'].vocab)))
@@ -220,8 +259,8 @@ def load_fields(train, valid, checkpoint):
 def collect_features(train, fields):
     # TODO: account for target features.
     # Also, why does fields need to have the structure it does?
-    src_features = onmt.IO.collect_features(fields)
-    aeq(len(src_features), train.n_src_feats)
+    src_features = onmt.IO.ONMTDataset.collect_features(fields)
+    aeq(len(src_features), train.nfeatures)
 
     return src_features
 
@@ -261,6 +300,7 @@ def build_optim(model, checkpoint):
 def main():
 
     # Load train and validate data.
+    # 加载数据
     print("Loading train and validate data from '%s'" % opt.data)
     train = torch.load(opt.data + '.train.pt')
     valid = torch.load(opt.data + '.valid.pt')

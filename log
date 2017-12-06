@@ -1,0 +1,53 @@
+Loading train and validate data from 'data/Distill'
+ * number of training sentences: 153326
+ * maximum batch size: 16
+ * vocabulary size. source = 50002; target = 49936
+Building model...
+Intializing model parameters.
+NMTModel (
+  (encoder): RNNEncoder (
+    (embeddings): Embeddings (
+      (make_embedding): Sequential (
+        (emb_luts): Elementwise (
+          (0): Embedding(50002, 500, padding_idx=1)
+        )
+      )
+    )
+    (rnn): LSTM(500, 256, num_layers=2, dropout=0.3)
+  )
+  (decoder): InputFeedRNNDecoder (
+    (embeddings): Embeddings (
+      (make_embedding): Sequential (
+        (emb_luts): Elementwise (
+          (0): Embedding(49936, 500, padding_idx=1)
+        )
+      )
+    )
+    (dropout): Dropout (p = 0.3)
+    (rnn): StackedLSTM (
+      (dropout): Dropout (p = 0.3)
+      (layers): ModuleList (
+        (0): LSTMCell(756, 256)
+        (1): LSTMCell(256, 256)
+      )
+    )
+    (attn): GlobalAttention (
+      (linear_in): Linear (256 -> 256)
+      (linear_out): Linear (512 -> 256)
+      (sm): Softmax ()
+      (tanh): Tanh ()
+    )
+  )
+  (generator): Sequential (
+    (0): Linear (256 -> 49936)
+    (1): LogSoftmax ()
+  )
+)
+* number of parameters: 65866360
+('encoder: ', 26303528)
+('decoder: ', 39562832)
+
+Epoch  1,    50/ 9583; acc:   4.82; ppl:   1.86; 1266 src tok/s; 1275 tgt tok/s;     31 s elapsed
+Epoch  1,   100/ 9583; acc:   5.34; ppl:   1.72; 1755 src tok/s; 1795 tgt tok/s;     52 s elapsed
+Epoch  1,   150/ 9583; acc:   7.85; ppl:   1.60; 1885 src tok/s; 1949 tgt tok/s;     71 s elapsed
+Epoch  1,   200/ 9583; acc:   9.35; ppl:   1.52; 1628 src tok/s; 1691 tgt tok/s;     92 s elapsed
