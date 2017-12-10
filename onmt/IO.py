@@ -89,18 +89,14 @@ def join_dicts(*args):
 
 
 class OrderedIterator(torchtext.data.Iterator):
-    pass
-    #def create_batches(self):
-    #    if self.train:
-    #        self.batches = torchtext.data.pool(
-    #            self.data(), self.batch_size,
-    #            self.sort_key, self.batch_size_fn,
-    #            random_shuffler=self.random_shuffler)
-    #    else:
-    #        self.batches = []
-    #        for b in torchtext.data.batch(self.data(), self.batch_size,
-    #                                      self.batch_size_fn):
-    #            self.batches.append(sorted(b, key=self.sort_key))
+    def create_batches(self):
+        if self.train:
+            self.batches = torchtext.data.pool(self.data(), self.batch_size,
+                                               self.sort_key, self.batch_size_fn,
+                                               random_shuffler=self.random_shuffler)
+        else:
+            self.batches = [sorted(b, key=self.sort_key) for b in torchtext.data.batch(self.data(), self.batch_size,
+                                                                                       self.batch_size_fn)]
 
 
 class ONMTDataset(torchtext.data.Dataset):
@@ -108,7 +104,7 @@ class ONMTDataset(torchtext.data.Dataset):
 
     @staticmethod
     def sort_key(ex):
-        "Sort in reverse size order"
+        """Sort in reverse size order"""
         return -len(ex.src)
 
     def __init__(self, src_path, tgt_path, fields, opt,
@@ -199,8 +195,7 @@ class ONMTDataset(torchtext.data.Dataset):
         super(ONMTDataset, self).__init__(
             construct_final(chain([ex], examples)),
             fields,
-            filter_pred if opt is not None
-            else None)
+            filter_pred if opt is not None else None)
 
     def _read_corpus_file(self, path, truncate):
         """
@@ -239,8 +234,8 @@ class ONMTDataset(torchtext.data.Dataset):
 
     def collapse_copy_scores(self, scores, batch, tgt_vocab):
         """Given scores from an expanded dictionary
-        corresponeding to a batch, sums together copies,
-        with a dictionary word when it is ambigious.
+        corresponding to a batch, sums together copies,
+        with a dictionary word when it is ambiguous.
         """
         offset = len(tgt_vocab)
         for b in range(batch.batch_size):
@@ -365,8 +360,9 @@ class ONMTDataset(torchtext.data.Dataset):
             fields["src"].vocab = merged_vocab
             fields["tgt"].vocab = merged_vocab
 
+
 def load_image_libs():
-    "Conditional import of torch image libs."
+    """Conditional import of torch image libs."""
     global Image, transforms
     from PIL import Image
     from torchvision import transforms

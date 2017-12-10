@@ -1,5 +1,5 @@
-#coding:utf8
-
+# -*- coding:utf8 -*-
+from __future__ import print_function
 from __future__ import division
 from builtins import bytes
 import os
@@ -8,9 +8,7 @@ import argparse
 import math
 import codecs
 import torch
-import cPickle as pkl
-from torch.autograd import  Variable
-
+import six.moves.cPickle as pkl
 
 import onmt
 import onmt.IO
@@ -43,101 +41,9 @@ def get_src_words(src_indices, index2str):
     raw_words = (index2str[i] for i in src_indices)
     words = takewhile(lambda w: w != onmt.IO.PAD_WORD, raw_words)
     return " ".join(words)
-def sent_2_id(sent, str2index):
-    sent = sent + ' ' + onmt.IO.EOS_WORD
-    return [str2index[word] for word in sent.split()]
 
-def id_2_sent(indices, distrib, index2str):
-    return map(list, zip(*[(index2str[id],p) for id,p in zip(indices,distrib) 
-                                if index2str[id] != onmt.IO.PAD_WORD]))
-
-def generate_ensemble(mode='generate'):
-    dummy_parser = argparse.ArgumentParser(description='train.py')
-    opts.model_opts(dummy_parser)
-    dummy_opt = dummy_parser.parse_known_args([])[0]
-
-    opt.cuda = opt.gpu > -1
-    if opt.cuda:
-        torch.cuda.set_device(opt.gpu)
-
-    opt.model = 'model/model_1.pt'
-    translator_1 = onmt.Translator(opt, dummy_opt.__dict__)
-    opt.model = 'model/model_2.pt'
-    translator_2 = onmt.Translator(opt, dummy_opt.__dict__)
-    opt.model = 'model/model_3.pt'
-    translator_3 = onmt.Translator(opt, dummy_opt.__dict__)
-    
-    out_file = codecs.open(opt.output, 'w', 'utf-8')
-
-    data = onmt.IO.ONMTDataset(opt.src, opt.tgt, translator_1.fields, None)
-    
-    test_data = onmt.IO.OrderedIterator(
-        dataset=data, device=opt.gpu,
-        batch_size=opt.batch_size, train=False, sort=False,
-        shuffle=False)
-     
-    src_vocab = translator_1.fields['src'].vocab
-    tgt_vocab = translator_1.fields['tgt'].vocab
-     
-    def var(a): return Variable(a, volatile = True)
-
-    if mode == 'generate':
-        out_file = codecs.open(opt.output, 'w', 'utf-8')
-    else:
-        sentences = [line.strip() for line in open(opt.tgt)]
-    
-    distribution = []
-     
-    for i,batch in enumerate(test_data):
-        sys.stdout.write(str(i * 100.0 / len(test_data)) + ' %\r')
-        
-        context_1, decStates_1 = translator_1.init_decoder_state(batch, data)
-        context_2, decStates_2 = translator_2.init_decoder_state(batch, data)
-        context_3, decStates_3 = translator_3.init_decoder_state(batch, data)
-        
-        input = var(torch.LongTensor([tgt_vocab.stoi[onmt.IO.BOS_WORD]])).view(1,1,1).cuda()
-        
-        distrib = []
-        if mode == 'generate':
-            pred_ids = []
-            for i in range(opt.max_sent_length):
-                # 预测到终止符
-                output_1, decStates_1 = translator_1.step(input, context_1, decStates_1)
-                output_2, decStates_2 = translator_2.step(input, context_2, decStates_2)
-                output_3, decStates_3 = translator_3.step(input, context_3, decStates_3)
-                #print output
-                output = (output_1 + output_2 + output_3) / 3
-                values, indices = torch.topk(output, 10)
-                distrib.append([values.view(-1).tolist(),indices.view(-1).tolist()])
-                pred_id = indices.view(-1).tolist()[0]
-                pred_ids.append(pred_id)
-                input = var(torch.LongTensor([pred_ids[-1]])).view(1,1,1).cuda()
-                
-                if pred_ids[-1] == tgt_vocab.stoi[onmt.IO.EOS_WORD]: 
-                    break
-            if len(pred_ids) > 1: 
-                sent, distrib = id_2_sent(pred_ids,distrib,tgt_vocab.itos)
-                out_file.write(' '.join(sent[:-1]) + '\n')
-                distribution.append(distrib)
-        else:
-            sent = sent_2_id(sentences[i], tgt_vocab.stoi)
-            for j in range(len(sent)):
-                # 预测到终止符
-                output_1, decStates_1 = translator_1.step(input, context_1, decStates_1)
-                output_2, decStates_2 = translator_2.step(input, context_2, decStates_2)
-                output_3, decStates_3 = translator_3.step(input, context_3, decStates_3)
-                #print output
-                output = (output_1 + output_2 + output_3) / 3
-                values, indices = torch.topk(output, 10)
-                distrib.append((values.view(-1).tolist(),indices.view(-1).tolist()))
-                input = var(torch.LongTensor([sent[j]])).view(1,1,1).cuda()
-            distribution.append(distrib)
-        
-        sys.stdout.flush()
-    pkl.dump(distribution, open('data/' + mode + '_prob.pkl', 'w'))
 
 def main():
-
     dummy_parser = argparse.ArgumentParser(description='train.py')
     opts.model_opts(dummy_parser)
     dummy_opt = dummy_parser.parse_known_args([])[0]
@@ -223,7 +129,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    #if opt.tgt:
-    #    generate_ensemble('gold')
-    #else:
-    #    generate_ensemble('generate')

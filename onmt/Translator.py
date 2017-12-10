@@ -1,3 +1,4 @@
+from __future__ import print_function
 import torch
 from torch.autograd import Variable
 
@@ -307,7 +308,7 @@ class Translator(object):
                 decStates.beam_update(j, b.getCurrentOrigin(), beam_size)
         vocab = self.fields['tgt'].vocab
         for i in range(len(vocab)):
-            print self.fields['tgt'].vocab.itos[i]
+            print(self.fields['tgt'].vocab.itos[i])
             
     def step(self, input, context, decStates):
         #  (1) convert words to indexes

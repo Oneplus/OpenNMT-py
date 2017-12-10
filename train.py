@@ -1,11 +1,11 @@
 #coding:utf8
-
+from __future__ import print_function
 from __future__ import division
 
 import os
 import sys
 import argparse
-import cPickle as pkl
+import six.moves.cPickle as pkl
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
@@ -100,7 +100,7 @@ def make_train_data_iter(train_data, opt):
     """
     return onmt.IO.OrderedIterator(
                 dataset=train_data, batch_size=opt.batch_size,
-                device=opt.gpuid[0] if opt.gpuid else -1,train = True, sort = True, shuffle = False,
+                device=opt.gpuid[0] if opt.gpuid else -1, train=True, sort=True, shuffle=False,
                 repeat=False)
 
 
@@ -134,31 +134,35 @@ def make_loss_compute(model, tgt_vocab, dataset, opt):
 
     return compute
 
+
 def ivar(v):
     return Variable(torch.LongTensor(v)).cuda()
+
+
 def fvar(v):
     return Variable(torch.FloatTensor(v)).cuda()
 
+
 def get_sorted_prob(train_data, prob):
     src_lengths = [len(src_data) for src_data in train_data.src]
-    _, sorted_prob = map(list,zip(*sorted(map(list,zip(src_lengths,prob)),key=lambda x:-x[0])))
+    _, sorted_prob = map(list, zip(*sorted(map(list, zip(src_lengths, prob)), key=lambda x: -x[0])))
     
     batch_probs = []
     start, batch_size, total = 0, opt.batch_size, len(sorted_prob)
     while start < total:
         if start + batch_size <= total: 
-            batch_prob = sorted_prob[start : start + batch_size]
+            batch_prob = sorted_prob[start: start + batch_size]
         else:
             batch_prob = sorted_prob[start:]
         start += batch_size
 
-        BLANK = [[0.0 for _ in range(opt.topK)],[1 for _ in range(opt.topK)]]
+        blank = [[0.0 for _ in range(opt.topK)], [1 for _ in range(opt.topK)]]
         
         max_len = max(len(ex) for ex in batch_prob)
         step = len(batch_prob)
         
         for i in range(step):
-            batch_prob[i] += [BLANK for _ in range(max_len - len(batch_prob[i]))]
+            batch_prob[i] += [blank for _ in range(max_len - len(batch_prob[i]))]
         
         weights = []
         targets = []
@@ -169,32 +173,34 @@ def get_sorted_prob(train_data, prob):
                     weights.append(batch_prob[k][j][0][i])
                     targets.append(batch_prob[k][j][1][i])
     
-        batch_probs.append((fvar(weights),ivar(targets)))
+        batch_probs.append((fvar(weights), ivar(targets)))
     return batch_probs
-def train_model(model, train_data, valid_data, fields, optim):
+
+
+def train_model(model, train_data, valid_data, fields, optim, distill=False):
     
     min_ppl = float('inf')
     
     train_iter = make_train_data_iter(train_data, opt)
     valid_iter = make_valid_data_iter(valid_data, opt)
-    train_loss = make_loss_compute(model, fields["tgt"].vocab,
-                                   train_data, opt)
-    valid_loss = make_loss_compute(model, fields["tgt"].vocab,
-                                   valid_data, opt)
+    train_loss = make_loss_compute(model, fields["tgt"].vocab, train_data, opt)
+    valid_loss = make_loss_compute(model, fields["tgt"].vocab, valid_data, opt)
 
     trunc_size = opt.truncated_decoder  # Badly named...
     shard_size = opt.max_generator_batches
 
-    trainer = onmt.Trainer(model, train_iter, valid_iter,
-                           train_loss, valid_loss, optim,
-                           trunc_size, shard_size, opt.topK)
-    
-    batch_prob = get_sorted_prob(train_data, pkl.load(open(opt.prob)))
+    if not distill:
+        trainer = onmt.Trainer(model, train_iter, valid_iter,
+                               train_loss, valid_loss, optim,
+                               trunc_size, shard_size)
+    else:
+        batch_prob = get_sorted_prob(train_data, pkl.load(open(opt.distill_prob)))
+        raise NotImplementedError('distilling trainer was not implemented.')
+
     for epoch in range(opt.start_epoch, opt.epochs + 1):
         print('')
         # 1. Train for one epoch on the training set.
-        #train_stats = trainer.train(epoch, fields, report_func)
-        train_stats = trainer.distill(epoch, fields, batch_prob, report_func)
+        train_stats = trainer.train(epoch, fields, report_func)
         print('Train perplexity: %g' % train_stats.ppl())
         print('Train accuracy: %g' % train_stats.accuracy())
 
@@ -300,7 +306,6 @@ def build_optim(model, checkpoint):
 def main():
 
     # Load train and validate data.
-    # 加载数据
     print("Loading train and validate data from '%s'" % opt.data)
     train = torch.load(opt.data + '.train.pt')
     valid = torch.load(opt.data + '.valid.pt')

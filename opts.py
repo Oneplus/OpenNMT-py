@@ -132,7 +132,9 @@ def preprocess_opts(parser):
 
 def train_opts(parser):
     # distribution of train dataset
-    parser.add_argument('-prob', type=str, default='data/generate_prob.pkl')
+    parser.add_argument('-distill_prob', type=str,
+                        help='Path to the distilling probability.')
+
     # Model loading/saving options
     parser.add_argument('-data', required=True,
                         help="""Path prefix to the ".train.pt" and
@@ -272,6 +274,10 @@ def translate_opts(parser):
                         help="Create dynamic dictionaries")
     parser.add_argument('-share_vocab', action='store_true',
                         help="Share source and target vocabulary")
+
+
+def ensemble_opts(parser):
+    parser.add_argument('--models', required=True, help='Path to several model .pt file.')
 
 
 def add_md_help_argument(parser):

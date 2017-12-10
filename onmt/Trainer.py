@@ -60,14 +60,14 @@ class Statistics(object):
         t = self.elapsed_time()
         experiment.add_scalar_value(prefix + "_ppl", self.ppl())
         experiment.add_scalar_value(prefix + "_accuracy", self.accuracy())
-        experiment.add_scalar_value(prefix + "_tgtper",  self.n_words / t)
+        experiment.add_scalar_value(prefix + "_tgtper", self.n_words / t)
         experiment.add_scalar_value(prefix + "_lr", lr)
 
 
 class Trainer(object):
     def __init__(self, model, train_iter, valid_iter,
                  train_loss, valid_loss, optim,
-                 trunc_size, shard_size, topK):
+                 trunc_size, shard_size):
         """
         Args:
             model: the seq2seq model.
@@ -88,7 +88,6 @@ class Trainer(object):
         self.optim = optim
         self.trunc_size = trunc_size
         self.shard_size = shard_size
-        self.topK = topK
         # Set model in training mode.
         self.model.train()
 
@@ -129,38 +128,6 @@ class Trainer(object):
                 if dec_state is not None:
                     dec_state.detach()
                 
-            if report_func is not None:
-                report_stats = report_func(
-                        epoch, i, len(self.train_iter),
-                        total_stats.start_time, self.optim.lr, report_stats)
-        return total_stats
-
-    def distill(self, epoch, fields, batch_prob, report_func=None):
-        """ Called for each epoch to train. """
-        total_stats = Statistics()
-        report_stats = Statistics()
-        
-        src_vocab = fields['src'].vocab
-        
-        for i, batch in enumerate(self.train_iter):
-            target_size, batch_size = batch.tgt.size()
-
-            dec_state = None
-            _, src_lengths = batch.src
-            src = onmt.IO.make_features(batch, 'src')
-            tgt_outer = onmt.IO.make_features(batch, 'tgt')
-            report_stats.n_src_words += src_lengths.sum()
-            # 2. F-prop all but generator.
-            self.model.zero_grad()
-            outputs, attns, dec_state = \
-                self.model(src, tgt_outer, src_lengths, dec_state)
-            # 3. Compute loss
-            batch_stats = self.train_loss.cross_entropy_loss(batch, outputs, self.topK, *batch_prob[i])
-            # 4. Update the parameters and statistics.
-            self.optim.step()
-            total_stats.update(batch_stats)
-            report_stats.update(batch_stats)
-
             if report_func is not None:
                 report_stats = report_func(
                         epoch, i, len(self.train_iter),
@@ -219,5 +186,47 @@ class Trainer(object):
             'epoch': epoch,
             'optim': self.optim
         }
-        torch.save(checkpoint,
-                '%s.pt' % (opt.save_model))
+        torch.save(checkpoint, '{0:s}.pt'.format(opt.save_model))
+
+
+class DistillTrainer(Trainer):
+    def __init__(self, model, train_iter, valid_iter, prob_iter,
+                 train_loss, valid_loss, optim,
+                 trunc_size, shard_size, top_k):
+        super(DistillTrainer, self).__init__(model, train_iter, valid_iter,
+                                             train_loss, valid_loss, optim,
+                                             trunc_size, shard_size)
+        self.prob_iter = prob_iter
+        self.top_k = top_k
+
+    def train(self, epoch, fields, report_func=None):
+        """ Called for each epoch to train. """
+        total_stats = Statistics()
+        report_stats = Statistics()
+
+        src_vocab = fields['src'].vocab
+
+        for i, (batch, batch_prob) in enumerate(zip(self.train_iter, self.prob_iter)):
+            target_size, batch_size = batch.tgt.size()
+
+            dec_state = None
+            _, src_lengths = batch.src
+            src = onmt.IO.make_features(batch, 'src')
+            tgt_outer = onmt.IO.make_features(batch, 'tgt')
+            report_stats.n_src_words += src_lengths.sum()
+            # 2. F-prop all but generator.
+            self.model.zero_grad()
+            outputs, attns, dec_state = \
+                self.model(src, tgt_outer, src_lengths, dec_state)
+            # 3. Compute loss
+            batch_stats = self.train_loss.cross_entropy_loss(batch, outputs, self.top_k, batch_prob)
+            # 4. Update the parameters and statistics.
+            self.optim.step()
+            total_stats.update(batch_stats)
+            report_stats.update(batch_stats)
+
+            if report_func is not None:
+                report_stats = report_func(
+                    epoch, i, len(self.train_iter),
+                    total_stats.start_time, self.optim.lr, report_stats)
+        return total_stats

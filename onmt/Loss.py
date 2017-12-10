@@ -108,6 +108,7 @@ class NMTLossCompute(LossComputeBase):
         weight = torch.ones(len(tgt_vocab))
         weight[self.padding_idx] = 0
         self.criterion = nn.NLLLoss(weight, size_average=False)
+
     def make_shard_state(self, batch, output, range_, attns=None):
         """ See base class for args description. """
         return {
@@ -130,7 +131,7 @@ class NMTLossCompute(LossComputeBase):
 
         return loss, stats
     
-    def cross_entropy_loss(self, batch, output, topK, weights, targets):
+    def cross_entropy_loss(self, batch, output, top_k, weights, targets):
 
         batch_stats = onmt.Statistics()
 
@@ -145,12 +146,13 @@ class NMTLossCompute(LossComputeBase):
         stats = self.stats(loss_data, scores_data, target_data)
         batch_stats.update(stats)
         
-        scores = torch.cat(tuple(scores for _ in range(topK)), dim=0).unsqueeze(0) * weights.unsqueeze(-1)
+        scores = torch.cat(tuple(scores for _ in range(top_k)), dim=0).unsqueeze(0) * weights.unsqueeze(-1)
         scores = scores.squeeze(0)
         cross_entropy_loss = self.criterion(scores,targets) 
         cross_entropy_loss.div(batch.batch_size).backward()
 
         return batch_stats
+
 
 def filter_shard_state(state):
     for k, v in state.items():
