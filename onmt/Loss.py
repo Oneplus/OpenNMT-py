@@ -130,28 +130,42 @@ class NMTLossCompute(LossComputeBase):
         stats = self.stats(loss_data, scores_data, target_data)
 
         return loss, stats
-    
-    def cross_entropy_loss(self, batch, output, top_k, weights, targets):
 
-        batch_stats = onmt.Statistics()
 
+class NMTCrossEntropyLossCompute(LossComputeBase):
+    """
+    CrossEntropy NMT Loss Computation.
+    """
+    def __init__(self, generator, tgt_vocab):
+        super(NMTCrossEntropyLossCompute, self).__init__(generator, tgt_vocab)
+        self.log_softmax = nn.LogSoftmax()
+
+    def make_shard_state(self, batch, output, range_, attns=None):
+        return {
+            "output": output,
+            "target": batch.tgt[range_[0] + 1: range_[1]],
+            "targets": batch.selected_indices[range_[0] + 1: range_[1]],
+            "distrib": batch.selected_distrib[range_[0] + 1: range_[1]],
+        }
+
+    def compute_loss(self, batch, output, target, targets, distrib):
         scores = self.generator(self.bottle(output))
         scores_data = scores.data.clone()
-        target = batch.tgt[1:]
+
         target = target.view(-1)
         target_data = target.data.clone()
-        
-        NLLLoss = self.criterion(scores, target)
-        loss_data = NLLLoss.div(batch.batch_size).data.clone()
-        stats = self.stats(loss_data, scores_data, target_data)
-        batch_stats.update(stats)
-        
-        scores = torch.cat(tuple(scores for _ in range(top_k)), dim=0).unsqueeze(0) * weights.unsqueeze(-1)
-        scores = scores.squeeze(0)
-        cross_entropy_loss = self.criterion(scores,targets) 
-        cross_entropy_loss.div(batch.batch_size).backward()
 
-        return batch_stats
+        targets = targets.view(-1, targets.size()[-1])
+        distrib = distrib.view(-1, distrib.size()[-1])
+
+        log_scores = self.log_softmax(scores)
+        loss = log_scores.gather(dim=1, index=targets) * distrib
+        loss = loss.sum() / batch.batch_size
+
+        loss_data = loss.data.clone()
+
+        stats = self.stats(loss_data, scores_data, target_data)
+        return loss, stats
 
 
 def filter_shard_state(state):

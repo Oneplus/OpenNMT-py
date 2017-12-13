@@ -240,7 +240,6 @@ class Translator(object):
 
         # Repeat everything beam_size times.
         context = rvar(context.data)
-        src = rvar(src.data)
         decStates.repeat_beam_size_times(beam_size)
         
         return context, decStates

@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 from itertools import chain, count
 
 import torch
+from torch.autograd import Variable
 import torchtext.data
 import torchtext.vocab
 
@@ -95,8 +96,54 @@ class OrderedIterator(torchtext.data.Iterator):
                                                self.sort_key, self.batch_size_fn,
                                                random_shuffler=self.random_shuffler)
         else:
-            self.batches = [sorted(b, key=self.sort_key) for b in torchtext.data.batch(self.data(), self.batch_size,
-                                                                                       self.batch_size_fn)]
+            self.batches = [sorted(b, key=self.sort_key)
+                            for b in torchtext.data.batch(self.data(), self.batch_size, self.batch_size_fn)]
+
+
+class ONMTField(torchtext.data.Field):
+    """ a modification of the Field to support transpose on 3D tensor. """
+    def numericalize(self, arr, device=None, train=True):
+        """Turn a batch of examples that use this field into a Variable.
+
+        If the field has include_lengths=True, a tensor of lengths will be
+        included in the return value.
+
+        Arguments:
+            arr: List of tokenized and padded examples, or tuple of a padded
+                list and a list of lengths if self.include_lengths is True.
+            device: Device to create the Variable's Tensor on. Use -1 for
+                CPU and None for the currently active GPU device. Default:
+                None.
+            train: Whether the batch is for a training set. If False, the
+                Variable will be created with volatile=True. Default: True.
+        """
+        if isinstance(arr, tuple):
+            arr, lengths = arr
+        if self.use_vocab:
+            if self.sequential:
+                arr = [[self.vocab.stoi[x] for x in ex] for ex in arr]
+            else:
+                arr = [self.vocab.stoi[x] for x in arr]
+
+            if self.postprocessing is not None:
+                arr = self.postprocessing(arr, self.vocab, train)
+        elif self.postprocessing is not None:
+            arr = self.postprocessing(arr, train)
+        arr = self.tensor_type(arr)
+        if self.include_lengths:
+            lengths = torch.LongTensor(lengths)
+        if self.sequential and not self.batch_first:
+            arr.transpose_(0, 1)
+        if device == -1:
+            if self.sequential:
+                arr = arr.contiguous()
+        else:
+            arr = arr.cuda(device)
+            if self.include_lengths:
+                lengths = lengths.cuda(device)
+        if self.include_lengths:
+            return Variable(arr, volatile=not train), lengths
+        return Variable(arr, volatile=not train)
 
 
 class ONMTDataset(torchtext.data.Dataset):
@@ -130,13 +177,12 @@ class ONMTDataset(torchtext.data.Dataset):
             src_point = next(self._read_corpus_file(src_path, src_truncate))
             self.nfeatures = src_point[2]
             src_data = self._read_corpus_file(src_path, src_truncate)
-            # src_examples是用来产生训练数据的迭代器
-            # 存的是{src:words}
             src_examples = self._construct_examples(src_data, "src")
         else:
             # TODO finish this.
             if not transforms:
                 load_image_libs()
+            src_examples = None
 
         if tgt_path is not None:
             tgt_truncate = 0 if opt is None else opt.tgt_seq_length_trunc
@@ -292,9 +338,7 @@ class ONMTDataset(torchtext.data.Dataset):
 
     @staticmethod
     def get_fields(nFeatures=0):
-        #获取数据集不同的处理方法
         fields = {}
-        #这里面存的是词汇
         fields["src"] = torchtext.data.Field(
             pad_token=PAD_WORD,
             include_lengths=True)
@@ -319,7 +363,6 @@ class ONMTDataset(torchtext.data.Dataset):
                     alignment[j, i, t] = 1
             return alignment
 
-        #存的词汇的映射关系
         fields["src_map"] = torchtext.data.Field(
             use_vocab=False, tensor_type=torch.FloatTensor,
             postprocessing=make_src, sequential=False)
@@ -338,6 +381,12 @@ class ONMTDataset(torchtext.data.Dataset):
         fields["indices"] = torchtext.data.Field(
             use_vocab=False, tensor_type=torch.LongTensor,
             sequential=False)
+
+        fields['selected_indices'] = ONMTField(
+            use_vocab=False, tensor_type=torch.LongTensor)
+
+        fields['selected_distrib'] = ONMTField(
+            use_vocab=False, tensor_type=torch.FloatTensor)
 
         return fields
 

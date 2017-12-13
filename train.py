@@ -24,6 +24,7 @@ parser = argparse.ArgumentParser(description='train.py')
 opts.add_md_help_argument(parser)
 opts.model_opts(parser)
 opts.train_opts(parser)
+opts.train_distill_opts(parser)
 
 opt = parser.parse_args()
 if opt.word_vec_size != -1:
@@ -126,6 +127,9 @@ def make_loss_compute(model, tgt_vocab, dataset, opt):
     if opt.copy_attn:
         compute = onmt.modules.CopyGeneratorLossCompute(
             model.generator, tgt_vocab, dataset, opt.copy_attn_force)
+    elif opt.distill:
+        # if do distillation.
+        compute = onmt.Loss.NMTCrossEntropyLossCompute(model.generator, tgt_vocab)
     else:
         compute = onmt.Loss.NMTLossCompute(model.generator, tgt_vocab)
 
@@ -177,8 +181,12 @@ def get_sorted_prob(train_data, prob):
     return batch_probs
 
 
-def train_model(model, train_data, valid_data, fields, optim, distill=False):
-    
+def train_model(model, train_data, valid_data, fields, optim):
+
+    if opt.distill:
+        assert hasattr(train_data.examples[0], 'selected_indices') and \
+               hasattr(train_data.examples[0], 'selected_distrib')
+
     min_ppl = float('inf')
     
     train_iter = make_train_data_iter(train_data, opt)
@@ -189,13 +197,9 @@ def train_model(model, train_data, valid_data, fields, optim, distill=False):
     trunc_size = opt.truncated_decoder  # Badly named...
     shard_size = opt.max_generator_batches
 
-    if not distill:
-        trainer = onmt.Trainer(model, train_iter, valid_iter,
-                               train_loss, valid_loss, optim,
-                               trunc_size, shard_size)
-    else:
-        batch_prob = get_sorted_prob(train_data, pkl.load(open(opt.distill_prob)))
-        raise NotImplementedError('distilling trainer was not implemented.')
+    trainer = onmt.Trainer(model, train_iter, valid_iter,
+                           train_loss, valid_loss, optim,
+                           trunc_size, shard_size)
 
     for epoch in range(opt.start_epoch, opt.epochs + 1):
         print('')
@@ -249,6 +253,14 @@ def load_fields(train, valid, checkpoint):
                 torch.load(opt.data + '.vocab.pt'))
     fields = dict([(k, f) for (k, f) in fields.items()
                   if k in train.examples[0].__dict__])
+
+    if opt.distill:
+        pad_info = torch.load(opt.data + '.pad.pt')
+        for k in pad_info:
+            assert k in fields
+            for f in pad_info[k]:
+                setattr(fields[k], f, pad_info[k][f])
+
     train.fields = fields
     valid.fields = fields
 
@@ -279,7 +291,6 @@ def build_model(model_opt, opt, fields, checkpoint):
         print('Multi gpu training: ', opt.gpuid)
         model = nn.DataParallel(model, device_ids=opt.gpuid, dim=1)
     print(model)
-
     return model
 
 

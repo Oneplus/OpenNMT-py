@@ -118,7 +118,6 @@ class Trainer(object):
                 batch_stats = self.train_loss.sharded_compute_loss(
                         batch, outputs, attns, j,
                         trunc_size, self.shard_size)
-                #batch_stats = self.train_loss.cross_entropy_loss(batch, outputs, j, trunc_size, self.topK)
                 # 4. Update the parameters and statistics.
                 self.optim.step()
                 total_stats.update(batch_stats)
@@ -187,46 +186,3 @@ class Trainer(object):
             'optim': self.optim
         }
         torch.save(checkpoint, '{0:s}.pt'.format(opt.save_model))
-
-
-class DistillTrainer(Trainer):
-    def __init__(self, model, train_iter, valid_iter, prob_iter,
-                 train_loss, valid_loss, optim,
-                 trunc_size, shard_size, top_k):
-        super(DistillTrainer, self).__init__(model, train_iter, valid_iter,
-                                             train_loss, valid_loss, optim,
-                                             trunc_size, shard_size)
-        self.prob_iter = prob_iter
-        self.top_k = top_k
-
-    def train(self, epoch, fields, report_func=None):
-        """ Called for each epoch to train. """
-        total_stats = Statistics()
-        report_stats = Statistics()
-
-        src_vocab = fields['src'].vocab
-
-        for i, (batch, batch_prob) in enumerate(zip(self.train_iter, self.prob_iter)):
-            target_size, batch_size = batch.tgt.size()
-
-            dec_state = None
-            _, src_lengths = batch.src
-            src = onmt.IO.make_features(batch, 'src')
-            tgt_outer = onmt.IO.make_features(batch, 'tgt')
-            report_stats.n_src_words += src_lengths.sum()
-            # 2. F-prop all but generator.
-            self.model.zero_grad()
-            outputs, attns, dec_state = \
-                self.model(src, tgt_outer, src_lengths, dec_state)
-            # 3. Compute loss
-            batch_stats = self.train_loss.cross_entropy_loss(batch, outputs, self.top_k, batch_prob)
-            # 4. Update the parameters and statistics.
-            self.optim.step()
-            total_stats.update(batch_stats)
-            report_stats.update(batch_stats)
-
-            if report_func is not None:
-                report_stats = report_func(
-                    epoch, i, len(self.train_iter),
-                    total_stats.start_time, self.optim.lr, report_stats)
-        return total_stats

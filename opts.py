@@ -180,8 +180,6 @@ def train_opts(parser):
                         help="Fix word embeddings on the encoder side.")
 
     # Optimization options
-    parser.add_argument('-topK', type=int, default=5,
-                        help='topK of ensemble distribution')
     parser.add_argument('-batch_size', type=int, default=64,
                         help='Maximum batch size')
     parser.add_argument('-max_generator_batches', type=int, default=32,
@@ -231,21 +229,15 @@ def train_opts(parser):
                         help="Name of the experiment for logging.")
 
 
-def translate_opts(parser):
-    parser.add_argument('-model', required=True,
-                        help='Path to model .pt file')
-    parser.add_argument('-src',   required=True,
-                        help="""Source sequence to decode (one line per
-                        sequence)""")
-    parser.add_argument('-src_img_dir',   default="",
-                        help='Source image directory')
-    parser.add_argument('-tgt',
-                        help='True target sequence (optional)')
+def train_distill_opts(parser):
+    parser.add_argument('-distill', action='store_true', default=False, help='If distill.')
+    parser.add_argument('-top_k', type=int, default=5, help='top k of ensemble distribution')
+
+
+def _generic_translate_opts(parser):
     parser.add_argument('-output', default='pred.txt',
                         help="""Path to output the predictions (each line will
                         be the decoded sequence""")
-    parser.add_argument('-beam_size',  type=int, default=5,
-                        help='Beam size')
     parser.add_argument('-batch_size', type=int, default=30,
                         help='Batch size')
     parser.add_argument('-max_sent_length', type=int, default=100,
@@ -276,8 +268,50 @@ def translate_opts(parser):
                         help="Share source and target vocabulary")
 
 
+def _translate_opts(parser):
+    parser.add_argument('-model', required=True,
+                        help='Path to model .pt file')
+    parser.add_argument('-src', required=True,
+                        help="""Source sequence to decode (one line per
+                        sequence)""")
+    parser.add_argument('-src_img_dir',   default="",
+                        help='Source image directory')
+    parser.add_argument('-tgt',
+                        help='True target sequence (optional)')
+    parser.add_argument('-beam_size',  type=int, default=5,
+                        help='Beam size')
+
+
+def translate_opts(parser):
+    _translate_opts(parser)
+    _generic_translate_opts(parser)
+
+
+def _ensemble_opts(parser):
+    parser.add_argument('-models', required=True, help='Path to several models\' .pt file.')
+    parser.add_argument('-data', required=True, help='Path to the data .pt file.')
+    parser.add_argument('-vocab', required=True, help='Path to the vocab .pt file.')
+    parser.add_argument('-save_data', required=True, help='Path to the new data .pt file.')
+    parser.add_argument('-save_pad', required=True, help='The information of padding')
+    parser.add_argument('-topk', default=10, type=int,
+                        help='The number of top elements.')
+    parser.add_argument('-explore_type', default='teacher_forcing',
+                        help='Way of exploring, valid arguments: [teacher_forcing, boltzmann, epsilon_greedy]')
+    parser.add_argument('-alpha', type=float, default=0.,
+                        help='the alpha value in distillation, only available in teacher_forcing.')
+    parser.add_argument('-boltzmann_temperature', type=float, default=1.,
+                        help='The temperature using in boltzmann sampling.')
+    parser.add_argument('-epsilon_greedy_epsilon', type=float, default=0.1,
+                        help='The probability in epsilon greedy.')
+    parser.add_argument('-beam_size', type=int, default=1,
+                        help='Beam size, should be fixed into 1.')
+    parser.add_argument('-seed', type=int, default=1,
+                        help='The seed of ensemble.')
+
+
 def ensemble_opts(parser):
-    parser.add_argument('--models', required=True, help='Path to several model .pt file.')
+    _ensemble_opts(parser)
+    _generic_translate_opts(parser)
 
 
 def add_md_help_argument(parser):
