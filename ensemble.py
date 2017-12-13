@@ -104,11 +104,11 @@ def ensemble():
                 for j in range(n_translators):
                     dec_states, context = payloads[j]
                     output_, dec_states = translators[j].step(input_, context, dec_states)
-                    output += softmax(output_.view(-1).tolist())
+                    output += output_.view(-1).tolist()
                     payloads[j] = dec_states, context
 
                 # print output
-                output *= opt.alpha / n_translators
+                output *= (opt.alpha / n_translators)
                 output[batch.tgt.data[step][0]] += 1. - opt.alpha
                 values_var, indices_var = torch.topk(torch.FloatTensor(output), opt.topk)
 
@@ -135,11 +135,10 @@ def ensemble():
                 for j in range(n_translators):
                     dec_states, context = payloads[j]
                     output_, dec_states = translators[j].step(input_, context, dec_states)
-                    output += softmax(output_.view(-1).tolist())
+                    output += output_.view(-1).tolist()
                     payloads[j] = dec_states, context
 
-                # print output
-                output *= opt.alpha / n_translators
+                output /= n_translators
                 values_var, indices_var = torch.topk(torch.FloatTensor(output), opt.topk)
 
                 values = values_var.view(-1).tolist()
@@ -182,11 +181,10 @@ def ensemble():
                 for j in range(n_translators):
                     dec_states, context = payloads[j]
                     output_, dec_states = translators[j].step(input_, context, dec_states)
-                    output += softmax(output_.view(-1).tolist())
+                    output += output_.view(-1).tolist()
                     payloads[j] = dec_states, context
 
-                # print output
-                output *= opt.alpha / n_translators
+                output /= n_translators
                 values_var, indices_var = torch.topk(torch.FloatTensor(output), opt.topk)
 
                 values = values_var.view(-1).tolist()
