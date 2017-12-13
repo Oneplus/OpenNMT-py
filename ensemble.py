@@ -8,9 +8,10 @@ import onmt
 import onmt.IO
 from onmt.Utils import use_gpu
 import opts
+import numpy as np
 import torch
 from torch.autograd import Variable
-import torchtext
+import glob
 
 parser = argparse.ArgumentParser(description='ensemble.py')
 opts.add_md_help_argument(parser)
@@ -23,6 +24,12 @@ if opt.batch_size != 1:
     print("WARNING: -batch_size isn't supported currently, "
           "we set it to 1 for now!")
     opt.batch_size = 1
+
+
+def softmax(x):
+    """Compute softmax values for each sets of scores in x."""
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum()
 
 
 def stoi(sent, str2index):
@@ -45,7 +52,7 @@ def ensemble():
         torch.cuda.set_device(opt.gpu)
 
     translators = []
-    for model in opt.models.split(','):
+    for model in glob.glob(opt.models):
         # tricky, override the model path.
         opt.model = model
         translators.append(onmt.Translator(opt, dummy_opt.__dict__))
@@ -64,7 +71,6 @@ def ensemble():
         train=False, sort=False,
         shuffle=False)
 
-    src_vocab = translators[0].fields['src'].vocab
     tgt_vocab = translators[0].fields['tgt'].vocab
 
     def var(a):
@@ -77,52 +83,67 @@ def ensemble():
 
     assert opt.beam_size == 1
     for i, batch in enumerate(test_iter):
-
         payloads = []
         for translator in translators:
             context, dec_states = translator.init_decoder_state(batch, test_data)
-            payloads.append((None, dec_states, context))
+            payloads.append((dec_states, context))
 
         input_ = var(torch.LongTensor([tgt_vocab.stoi[onmt.IO.BOS_WORD]])).view(1, 1, 1)
         if use_gpu(opt):
             input_.cuda()
 
+        n_steps = 0
+        tgt = []
         selected_distrib, selected_indices = [], []
+
         if opt.explore_type == 'teacher_forcing' or opt.explore_type == 'teach_force':
             n_steps = batch.tgt.size(0)
             for step in range(n_steps):
+                output = np.zeros(len(tgt_vocab.itos))
                 for j in range(n_translators):
-                    _, dec_states, context = payloads[j]
-                    output, dec_states = translators[j].step(input_, context, dec_states)
-                    payloads[j] = output, dec_states, context
+                    dec_states, context = payloads[j]
+                    output_, dec_states = translators[j].step(input_, context, dec_states)
+                    output += softmax(output_.view(-1).tolist())
+                    payloads[j] = dec_states, context
+
                 # print output
-                output = sum([payload[0] for payload in payloads]) / len(translators)
-                values, indices = torch.topk(output, opt.topk)
+                output *= opt.alpha / n_translators
+                output[batch.tgt.data[step][0]] += 1. - opt.alpha
+                values_var, indices_var = torch.topk(torch.FloatTensor(output), opt.topk)
 
-                selected_distrib.append(values.view(-1).tolist())
-                selected_indices.append(indices.view(-1).tolist())
+                values = values_var.view(-1).tolist()
+                indices = indices_var.view(-1).tolist()
+                if opt.renormalize:
+                    values = softmax(np.exp(values))
+                selected_distrib.append(values)
+                selected_indices.append(indices)
 
+                tgt.append(batch.tgt[step][0].data[0])
                 input_ = batch.tgt[step][0].view(1, 1, 1)
                 if use_gpu(opt):
                     input_.cuda()
 
-            index = batch.indices.data.type(torch.IntTensor)[0]
+            index = batch.indices.data[0]
             test_data.examples[index].selected_distrib = selected_distrib
             test_data.examples[index].selected_indices = selected_indices
 
         elif opt.explore_type == 'epsilon_greedy' or opt.explore_type == 'translate':
-            tgt = []
             for step in range(opt.max_sent_length):
+                output = np.zeros(len(tgt_vocab.itos))
                 for j in range(n_translators):
-                    _, dec_states, context = payloads[j]
-                    output, dec_states = translators[j].step(input_, context, dec_states)
-                    payloads[j] = output, dec_states, context
+                    dec_states, context = payloads[j]
+                    output_, dec_states = translators[j].step(input_, context, dec_states)
+                    output += softmax(output_.view(-1).tolist())
+                    payloads[j] = dec_states, context
+
                 # print output
-                output = sum([payload[0] for payload in payloads]) / len(translators)
-                values_var, indices_var = torch.topk(output, opt.topk)
+                output *= opt.alpha / n_translators
+                values_var, indices_var = torch.topk(torch.FloatTensor(output), opt.topk)
+
                 values = values_var.view(-1).tolist()
                 indices = indices_var.view(-1).tolist()
-
+                if opt.renormalize:
+                    values = softmax(np.exp(values))
                 selected_distrib.append(values)
                 selected_indices.append(indices)
 
@@ -135,33 +156,39 @@ def ensemble():
                 else:
                     pred_id = indices[0]
 
-                tgt.append(tgt_vocab.itos[pred_id])
                 if tgt[-1] == onmt.IO.EOS_WORD:
                     break
 
+                tgt.append(pred_id)
                 input_ = var(torch.LongTensor([pred_id])).view(1, 1, 1)
                 if use_gpu(opt):
                     input_.cuda()
 
+                n_steps += 1
+
             if opt.explore_type == 'epsilon_greedy':
-                index = batch.indices.data.type(torch.LongTensor)[0]
+                index = batch.indices.data[0]
                 test_data.examples[index].selected_distrib = selected_distrib
                 test_data.examples[index].selected_indices = selected_indices
             else:
                 print(' '.join(tgt[:-1]), file=output_handler)
         else:
-            tgt = []
             for step in range(opt.max_sent_length):
+                output = np.zeros(len(tgt_vocab.itos))
                 for j in range(n_translators):
-                    _, dec_states, context = payloads[j]
-                    output, dec_states = translators[j].step(input_, context, dec_states)
-                    payloads[j] = output, dec_states, context
+                    dec_states, context = payloads[j]
+                    output_, dec_states = translators[j].step(input_, context, dec_states)
+                    output += softmax(output_.view(-1).tolist())
+                    payloads[j] = dec_states, context
+
                 # print output
-                output = sum([payload[0] for payload in payloads]) / len(translators)
-                values_var, indices_var = torch.topk(output, opt.topk)
+                output *= opt.alpha / n_translators
+                values_var, indices_var = torch.topk(torch.FloatTensor(output), opt.topk)
+
                 values = values_var.view(-1).tolist()
                 indices = indices_var.view(-1).tolist()
-
+                if opt.renormalize:
+                    values = softmax(np.exp(values))
                 selected_distrib.append(values)
                 selected_indices.append(indices)
 
@@ -170,13 +197,22 @@ def ensemble():
                 if tgt[-1] == onmt.IO.EOS_WORD:
                     break
 
+                tgt.append(pred_id)
                 input_ = var(torch.LongTensor([pred_id])).view(1, 1, 1)
                 if use_gpu(opt):
                     input_.cuda()
 
-            index = batch.indices.data.type(torch.LongTensor)[0]
+                n_steps += 1
+
+            index = batch.indices.data[0]
             test_data.examples[index].selected_distrib = selected_distrib
             test_data.examples[index].selected_indices = selected_indices
+
+        if opt.verbose:
+            print(selected_distrib)
+            print(selected_indices)
+            print([tgt[step] for step in range(n_steps)])
+            print([tgt_vocab.itos[tgt[step]] for step in range(n_steps)])
 
     if opt.explore_type != 'translate':
         test_data.fields = []

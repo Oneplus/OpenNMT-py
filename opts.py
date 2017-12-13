@@ -295,9 +295,11 @@ def _ensemble_opts(parser):
     parser.add_argument('-save_pad', required=True, help='The information of padding')
     parser.add_argument('-topk', default=10, type=int,
                         help='The number of top elements.')
+    parser.add_argument('-renormalize', default=False, action='store_true',
+                        help='Do the renormalization.')
     parser.add_argument('-explore_type', default='teacher_forcing',
                         help='Way of exploring, valid arguments: [teacher_forcing, boltzmann, epsilon_greedy]')
-    parser.add_argument('-alpha', type=float, default=0.,
+    parser.add_argument('-alpha', type=float, default=1.,
                         help='the alpha value in distillation, only available in teacher_forcing.')
     parser.add_argument('-boltzmann_temperature', type=float, default=1.,
                         help='The temperature using in boltzmann sampling.')
