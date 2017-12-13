@@ -17,8 +17,11 @@ import onmt.ModelConstructor
 import onmt.modules
 from onmt.Utils import aeq, use_gpu
 import opts
+import random
 
-parser = argparse.ArgumentParser(description='train.py')
+parser = argparse.ArgumentParser(
+    description='train.py',
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 # opts.py
 opts.add_md_help_argument(parser)
@@ -37,6 +40,7 @@ if opt.layers != -1:
 
 opt.brnn = (opt.encoder_type == "brnn")
 if opt.seed > 0:
+    random.seed(opt.seed)
     torch.manual_seed(opt.seed)
 
 if opt.rnn_type == "SRU" and not opt.gpuid:
@@ -306,6 +310,9 @@ def build_optim(model, checkpoint):
             opt.optim, opt.learning_rate, opt.max_grad_norm,
             lr_decay=opt.learning_rate_decay,
             start_decay_at=opt.start_decay_at,
+            beta1=opt.adam_beta1,
+            beta2=opt.adam_beta2,
+            adagrad_accum=opt.adagrad_accumulator_init,
             opt=opt
         )
 
