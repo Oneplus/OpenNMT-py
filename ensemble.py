@@ -131,6 +131,9 @@ def ensemble():
 
         elif opt.explore_type == 'epsilon_greedy' or opt.explore_type == 'translate':
             for step in range(opt.max_sent_length):
+                if tgt[-1] == tgt_vocab.stoi[onmt.IO.EOS_WORD]:
+                    break
+
                 output = np.zeros(len(tgt_vocab.itos))
                 for j in range(n_translators):
                     dec_states, context = payloads[j]
@@ -156,10 +159,6 @@ def ensemble():
                         pred_id = indices[0]
                 else:
                     pred_id = indices[0]
-
-                if tgt[-1] == onmt.IO.EOS_WORD:
-                    break
-
                 tgt.append(pred_id)
 
                 if use_gpu(opt):
@@ -177,6 +176,9 @@ def ensemble():
                 print(' '.join(tgt[:-1]), file=output_handler)
         else:
             for step in range(opt.max_sent_length):
+                if tgt[-1] == onmt.IO.EOS_WORD:
+                    break
+
                 output = np.zeros(len(tgt_vocab.itos))
                 for j in range(n_translators):
                     dec_states, context = payloads[j]
@@ -195,10 +197,6 @@ def ensemble():
                 selected_indices.append(indices)
 
                 pred_id = random.choice(indices, p=values)
-                tgt.append(tgt_vocab.itos[pred_id])
-                if tgt[-1] == onmt.IO.EOS_WORD:
-                    break
-
                 tgt.append(pred_id)
                 if use_gpu(opt):
                     input_ = var(torch.LongTensor([pred_id])).view(1, 1, 1).cuda()
