@@ -88,9 +88,10 @@ def ensemble():
             context, dec_states = translator.init_decoder_state(batch, test_data)
             payloads.append((dec_states, context))
 
-        input_ = var(torch.LongTensor([tgt_vocab.stoi[onmt.IO.BOS_WORD]])).view(1, 1, 1)
         if use_gpu(opt):
-            input_.cuda()
+            input_ = var(torch.LongTensor([tgt_vocab.stoi[onmt.IO.BOS_WORD]])).view(1, 1, 1).cuda()
+        else:
+            input_ = var(torch.LongTensor([tgt_vocab.stoi[onmt.IO.BOS_WORD]])).view(1, 1, 1)
 
         n_steps = 0
         tgt = []
@@ -119,9 +120,10 @@ def ensemble():
                 selected_indices.append(indices)
 
                 tgt.append(batch.tgt[step][0].data[0])
-                input_ = batch.tgt[step][0].view(1, 1, 1)
                 if use_gpu(opt):
-                    input_.cuda()
+                    input_ = batch.tgt[step][0].view(1, 1, 1).cuda()
+                else:
+                    input_ = batch.tgt[step][0].view(1, 1, 1)
 
             index = batch.indices.data[0]
             test_data.examples[index].selected_distrib = selected_distrib
@@ -160,9 +162,11 @@ def ensemble():
                     break
 
                 tgt.append(pred_id)
-                input_ = var(torch.LongTensor([pred_id])).view(1, 1, 1)
+
                 if use_gpu(opt):
-                    input_.cuda()
+                    input_ = var(torch.LongTensor([pred_id])).view(1, 1, 1).cuda()
+                else:
+                    input_ = var(torch.LongTensor([pred_id])).view(1, 1, 1)
 
                 n_steps += 1
 
@@ -198,9 +202,10 @@ def ensemble():
                     break
 
                 tgt.append(pred_id)
-                input_ = var(torch.LongTensor([pred_id])).view(1, 1, 1)
                 if use_gpu(opt):
-                    input_.cuda()
+                    input_ = var(torch.LongTensor([pred_id])).view(1, 1, 1).cuda()
+                else:
+                    input_ = var(torch.LongTensor([pred_id])).view(1, 1, 1)
 
                 n_steps += 1
 
