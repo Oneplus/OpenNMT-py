@@ -329,7 +329,7 @@ def _ensemble_opts(parser):
                         help='Do the renormalization.')
     parser.add_argument('-explore_type', default='teacher_forcing',
                         help='Way of exploring, valid arguments: [teacher_forcing, boltzmann, epsilon_greedy]')
-    parser.add_argument('-alpha', type=float, default=1.,
+    parser.add_argument('-distill_alpha', type=float, default=1.,
                         help='the alpha value in distillation, only available in teacher_forcing.')
     parser.add_argument('-boltzmann_temperature', type=float, default=1.,
                         help='The temperature using in boltzmann sampling.')

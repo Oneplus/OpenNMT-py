@@ -131,7 +131,7 @@ def ensemble():
 
         elif opt.explore_type == 'epsilon_greedy' or opt.explore_type == 'translate':
             for step in range(opt.max_sent_length):
-                if tgt[-1] == tgt_vocab.stoi[onmt.IO.EOS_WORD]:
+                if len(tgt) > 0 and tgt[-1] == tgt_vocab.stoi[onmt.IO.EOS_WORD]:
                     break
 
                 output = np.zeros(len(tgt_vocab.itos))
@@ -173,10 +173,10 @@ def ensemble():
                 test_data.examples[index].selected_distrib = selected_distrib
                 test_data.examples[index].selected_indices = selected_indices
             else:
-                print(' '.join(tgt[:-1]), file=output_handler)
+                print(' '.join([tgt_vocab.itos[t] for t in tgt[:-1]]), file=output_handler)
         else:
             for step in range(opt.max_sent_length):
-                if tgt[-1] == onmt.IO.EOS_WORD:
+                if len(tgt) > 0 and tgt[-1] == tgt_vocab.stoi[onmt.IO.EOS_WORD]:
                     break
 
                 output = np.zeros(len(tgt_vocab.itos))
