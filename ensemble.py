@@ -92,7 +92,7 @@ def ensemble():
     report_stats = onmt.Statistics()
     bos_id = tgt_vocab.stoi[onmt.IO.BOS_WORD]
     eos_id = tgt_vocab.stoi[onmt.IO.EOS_WORD]
-    softmax = tt.nn.Softmax()
+    softmax = torch.nn.Softmax()
 
     for bid, batch in enumerate(test_iter):
         payloads = []
