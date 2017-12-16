@@ -315,10 +315,10 @@ class Translator(object):
         for i in range(len(vocab)):
             print(self.fields['tgt'].vocab.itos[i])
             
-    def step(self, input, context, decStates):
+    def step(self, inp, context, decStates, context_lengths):
         #  (1) convert words to indexes
-        beam_size = 1
-        batch_size = 1
+        beam_size = self.opt.beam_size
+        batch_size = inp.size(1)
 
         def bottle(m):
             return m.view(batch_size * beam_size, -1)
@@ -327,8 +327,9 @@ class Translator(object):
             return m.view(beam_size, batch_size, -1)
 
         # Run one step.
+        inp = inp.unsqueeze(2)
         decOut, decStates, attn = \
-            self.model.decoder(input, context, decStates)
+            self.model.decoder(inp, context, decStates, context_lengths=context_lengths)
         decOut = decOut.squeeze(0)
         # decOut: beam x rnn_size
             

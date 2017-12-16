@@ -339,6 +339,8 @@ def _ensemble_opts(parser):
                         help='Beam size, should be fixed into 1.')
     parser.add_argument('-seed', type=int, default=1,
                         help='The seed of ensemble.')
+    parser.add_argument('-report_every', type=int, default=50,
+                        help="Print stats at this interval.")
 
 
 def ensemble_opts(parser):

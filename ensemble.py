@@ -6,9 +6,7 @@ import random
 import codecs
 import onmt
 import onmt.IO
-from onmt.Utils import use_gpu
 import opts
-import numpy as np
 import torch
 from torch.autograd import Variable
 import glob
@@ -20,16 +18,6 @@ opts.ensemble_opts(parser)
 opt = parser.parse_args()
 random.seed(opt.seed)
 torch.manual_seed(opt.seed)
-if opt.batch_size != 1:
-    print("WARNING: -batch_size isn't supported currently, "
-          "we set it to 1 for now!")
-    opt.batch_size = 1
-
-
-def softmax(x):
-    """Compute softmax values for each sets of scores in x."""
-    e_x = np.exp(x - np.max(x))
-    return e_x / e_x.sum()
 
 
 def stoi(sent, str2index):
@@ -42,14 +30,28 @@ def itos(indices, distrib, index2str):
                            for i, p in zip(indices, distrib) if index2str[i] != onmt.IO.PAD_WORD]))
 
 
-def ensemble():
+def get_batch_stats(batch, tgt, bos_id, eos_id):
+    stats = onmt.Statistics()
+    gold = batch.tgt.data.clone()
+    pred = tgt.clone()
+
+    # TODO: it's counted in wrong way.
+    pred_mask = (pred != bos_id) * (pred != eos_id)
+    stats.n_words = pred_mask.sum()
+    if gold.size(0) < pred.size(0):
+        pred = pred.narrow(0, 0, gold.size(0))
+        pred_mask = pred_mask.narrow(0, 0, gold.size(0))
+    elif pred.size(0) < gold.size(0):
+        gold = gold.narrow(0, 0, pred.size(0))
+    matched = (pred == gold) * pred_mask
+    stats.n_correct = matched.sum()
+    return stats
+
+
+def load_translators():
     dummy_parser = argparse.ArgumentParser(description='train.py')
     opts.model_opts(dummy_parser)
     dummy_opt = dummy_parser.parse_known_args([])[0]
-
-    opt.cuda = opt.gpu > -1
-    if opt.cuda:
-        torch.cuda.set_device(opt.gpu)
 
     translators = []
     for model in glob.glob(opt.models):
@@ -59,6 +61,16 @@ def ensemble():
     n_translators = len(translators)
     assert n_translators > 0
     print('Created {0} translators.'.format(n_translators))
+    return translators
+
+
+def ensemble():
+    opt.cuda = opt.gpu > -1
+    if opt.cuda:
+        torch.cuda.set_device(opt.gpu)
+    tt = torch.cuda if opt.cuda else torch
+
+    translators = load_translators()
 
     test_data = torch.load(opt.data + '.pt')
     fields = onmt.IO.ONMTDataset.load_fields(torch.load(opt.vocab + '.pt'))
@@ -67,8 +79,8 @@ def ensemble():
     test_data.fields = fields
     test_iter = onmt.IO.OrderedIterator(
         dataset=test_data, batch_size=opt.batch_size,
-        device=opt.gpu if opt.gpu > -1 else -1,
-        train=False, sort=False,
+        device=opt.gpu,
+        train=False, sort=True,
         shuffle=False)
 
     tgt_vocab = translators[0].fields['tgt'].vocab
@@ -76,144 +88,90 @@ def ensemble():
     def var(a):
         return Variable(a, volatile=True)
 
-    if opt.explore_type == 'translate':
-        output_handler = codecs.open(opt.output, 'w', encoding='utf-8')
-    else:
-        output_handler = None
-
     assert opt.beam_size == 1
-    for i, batch in enumerate(test_iter):
+    report_stats = onmt.Statistics()
+    bos_id = tgt_vocab.stoi[onmt.IO.BOS_WORD]
+    eos_id = tgt_vocab.stoi[onmt.IO.EOS_WORD]
+    softmax = tt.nn.Softmax()
+
+    for bid, batch in enumerate(test_iter):
         payloads = []
+        _, src_lengths = batch.src
+        context_lengths = src_lengths.repeat(opt.beam_size)
         for translator in translators:
             context, dec_states = translator.init_decoder_state(batch, test_data)
             payloads.append((dec_states, context))
 
-        if use_gpu(opt):
-            input_ = var(torch.LongTensor([tgt_vocab.stoi[onmt.IO.BOS_WORD]])).view(1, 1, 1).cuda()
-        else:
-            input_ = var(torch.LongTensor([tgt_vocab.stoi[onmt.IO.BOS_WORD]])).view(1, 1, 1)
+        n_translators_mask = tt.FloatTensor(batch.batch_size, len(tgt_vocab.itos)).fill_(len(translators))
+        end_mask = tt.ByteTensor(batch.batch_size).fill_(0)
+        n_steps = batch.tgt.size(0) if opt.explore_type == 'teacher_forcing' else opt.max_sent_length
 
-        n_steps = 0
+        inp_tensor = tt.LongTensor(batch.batch_size).fill_(bos_id)
+        inp = var(inp_tensor).view(1, -1)
         tgt = []
-        selected_distrib, selected_indices = [], []
+        selected_distrib = []
+        selected_indices = []
+        for step in range(n_steps):
+            output = tt.FloatTensor(batch.batch_size, len(tgt_vocab.itos)).zero_()
+            for j in range(len(translators)):
+                dec_states, context = payloads[j]
+                output_, dec_states = translators[j].step(inp, context, dec_states, context_lengths)
+                output += output_.view(batch.batch_size, -1)
+                payloads[j] = dec_states, context
+            output = output.div(n_translators_mask)
 
-        if opt.explore_type == 'teacher_forcing' or opt.explore_type == 'teach_force':
-            n_steps = batch.tgt.size(0)
-            for step in range(n_steps):
-                output = np.zeros(len(tgt_vocab.itos))
-                for j in range(n_translators):
-                    dec_states, context = payloads[j]
-                    output_, dec_states = translators[j].step(input_, context, dec_states)
-                    output += output_.view(-1).tolist()
-                    payloads[j] = dec_states, context
+            if opt.explore_type == 'teacher_forcing':
+                output *= opt.distill_alpha
+                output[:, batch.tgt.data[step]] += 1. - opt.distill_alpha
+            values, indices = torch.topk(output, opt.topk)
 
-                # print output
-                output *= (opt.alpha / n_translators)
-                output[batch.tgt.data[step][0]] += 1. - opt.alpha
-                values_var, indices_var = torch.topk(torch.FloatTensor(output), opt.topk)
+            tgt.append(inp_tensor.view(-1))
+            selected_distrib.append(values)
+            selected_indices.append(indices)
 
-                values = values_var.view(-1).tolist()
-                indices = indices_var.view(-1).tolist()
-                if opt.renormalize:
-                    values = softmax(np.exp(values))
-                selected_distrib.append(values)
-                selected_indices.append(indices)
+            if opt.renormalize:
+                values = softmax(tt.exp(values))
 
-                tgt.append(batch.tgt[step][0].data[0])
-                if use_gpu(opt):
-                    input_ = batch.tgt[step][0].view(1, 1, 1).cuda()
-                else:
-                    input_ = batch.tgt[step][0].view(1, 1, 1)
-
-            index = batch.indices.data[0]
-            test_data.examples[index].selected_distrib = selected_distrib
-            test_data.examples[index].selected_indices = selected_indices
-
-        elif opt.explore_type == 'epsilon_greedy' or opt.explore_type == 'translate':
-            for step in range(opt.max_sent_length):
-                if len(tgt) > 0 and tgt[-1] == tgt_vocab.stoi[onmt.IO.EOS_WORD]:
-                    break
-
-                output = np.zeros(len(tgt_vocab.itos))
-                for j in range(n_translators):
-                    dec_states, context = payloads[j]
-                    output_, dec_states = translators[j].step(input_, context, dec_states)
-                    output += output_.view(-1).tolist()
-                    payloads[j] = dec_states, context
-
-                output /= n_translators
-                values_var, indices_var = torch.topk(torch.FloatTensor(output), opt.topk)
-
-                values = values_var.view(-1).tolist()
-                indices = indices_var.view(-1).tolist()
-                if opt.renormalize:
-                    values = softmax(np.exp(values))
-                selected_distrib.append(values)
-                selected_indices.append(indices)
-
-                if opt.explore_type == 'epsilon_greedy':
-                    flip_coin = random.random()
-                    if flip_coin < opt.epsilon_greedy_epsilon:
-                        pred_id = random.choice(indices)
-                    else:
-                        pred_id = indices[0]
-                else:
-                    pred_id = indices[0]
-                tgt.append(pred_id)
-
-                if use_gpu(opt):
-                    input_ = var(torch.LongTensor([pred_id])).view(1, 1, 1).cuda()
-                else:
-                    input_ = var(torch.LongTensor([pred_id])).view(1, 1, 1)
-
-                n_steps += 1
-
-            if opt.explore_type == 'epsilon_greedy':
-                index = batch.indices.data[0]
-                test_data.examples[index].selected_distrib = selected_distrib
-                test_data.examples[index].selected_indices = selected_indices
+            if opt.explore_type == 'teacher_forcing':
+                inp_tensor = batch.tgt[step].data.view(1, -1)
+            elif opt.explore_type == 'epsilon_greedy':
+                # TODO
+                raise NotImplementedError('not implemented')
+            elif opt.explore_type == 'translate':
+                inp_tensor = indices[:, 0].contiguous().view(1, -1)
             else:
-                print(' '.join([tgt_vocab.itos[t] for t in tgt[:-1]]), file=output_handler)
-        else:
-            for step in range(opt.max_sent_length):
-                if len(tgt) > 0 and tgt[-1] == tgt_vocab.stoi[onmt.IO.EOS_WORD]:
-                    break
+                ind = torch.distributions.Categorical(values).sample().view(-1, 1)
+                inp_tensor = indices.gather(1, ind).view(1, -1)
 
-                output = np.zeros(len(tgt_vocab.itos))
-                for j in range(n_translators):
-                    dec_states, context = payloads[j]
-                    output_, dec_states = translators[j].step(input_, context, dec_states)
-                    output += output_.view(-1).tolist()
-                    payloads[j] = dec_states, context
+            inp_tensor.masked_fill_(end_mask, eos_id)
+            end_mask = (inp_tensor == eos_id)
 
-                output /= n_translators
-                values_var, indices_var = torch.topk(torch.FloatTensor(output), opt.topk)
+            inp = var(inp_tensor)
 
-                values = values_var.view(-1).tolist()
-                indices = indices_var.view(-1).tolist()
-                if opt.renormalize:
-                    values = softmax(np.exp(values))
-                selected_distrib.append(values)
-                selected_indices.append(indices)
+            if end_mask.sum() == batch.batch_size:
+                break
 
-                pred_id = random.choice(indices, p=values)
-                tgt.append(pred_id)
-                if use_gpu(opt):
-                    input_ = var(torch.LongTensor([pred_id])).view(1, 1, 1).cuda()
-                else:
-                    input_ = var(torch.LongTensor([pred_id])).view(1, 1, 1)
+        tgt = torch.stack(tgt)
+        selected_distrib = torch.stack(selected_distrib)
+        selected_indices = torch.stack(selected_indices)
+        n_steps = len(tgt)
 
-                n_steps += 1
+        report_stats.update(get_batch_stats(batch, tgt, bos_id, eos_id))
+        if (bid + 1) % opt.report_every == -1 % opt.report_every:
+            report_stats.output(0, bid + 1, len(test_iter), report_stats.start_time)
 
-            index = batch.indices.data[0]
-            test_data.examples[index].selected_distrib = selected_distrib
-            test_data.examples[index].selected_indices = selected_indices
+        for b, i in enumerate(batch.indices.data.tolist()):
+            test_data.examples[i].tgt = [tgt_vocab.itos[tgt[t][b]] for t in range(n_steps) if tgt[t][b] != eos_id]
+            test_data.examples[i].selected_distrib = [selected_distrib[t][b]
+                                                      for t in range(n_steps) if tgt[t][b] != eos_id]
+            test_data.examples[i].selected_indices = [selected_indices[t][b]
+                                                      for t in range(n_steps) if tgt[t][b] != eos_id]
 
-        if opt.verbose:
-            print(selected_distrib)
-            print(selected_indices)
-            print([tgt[step] for step in range(n_steps)])
-            print([tgt_vocab.itos[tgt[step]] for step in range(n_steps)])
+        if opt.verbose and opt.explore_type != 'translate':
+            for i in batch.indices.data.tolist():
+                print(test_data.examples[i].tgt)
+                print(test_data.examples[i].selected_distrib)
+                print(test_data.examples[i].selected_indices)
 
     if opt.explore_type != 'translate':
         test_data.fields = []
@@ -233,6 +191,10 @@ def ensemble():
         }
         torch.save(pad_info, open(opt.save_pad + '.pt', 'wb'))
         print('Distillation data is generated.')
+    else:
+        output_handler = codecs.open(opt.output, 'w', encoding='utf-8')
+        for example in test_data.examples:
+            print(' '.join(example.tgt[1:]), file=output_handler)
 
 
 if __name__ == "__main__":
