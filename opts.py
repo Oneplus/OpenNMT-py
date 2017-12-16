@@ -131,10 +131,6 @@ def preprocess_opts(parser):
 
 
 def train_opts(parser):
-    # distribution of train dataset
-    parser.add_argument('-distill_prob', type=str,
-                        help='Path to the distilling probability.')
-
     # Model loading/saving options
     parser.add_argument('-data', required=True,
                         help="""Path prefix to the ".train.pt" and
@@ -254,7 +250,6 @@ def train_opts(parser):
 
 def train_distill_opts(parser):
     parser.add_argument('-distill', action='store_true', default=False, help='If distill.')
-    parser.add_argument('-top_k', type=int, default=5, help='top k of ensemble distribution')
 
 
 def _generic_translate_opts(parser):

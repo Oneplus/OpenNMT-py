@@ -162,9 +162,9 @@ def ensemble():
 
         for b, i in enumerate(batch.indices.data.tolist()):
             test_data.examples[i].tgt = [tgt_vocab.itos[tgt[t][b]] for t in range(n_steps) if tgt[t][b] != eos_id]
-            test_data.examples[i].selected_distrib = [selected_distrib[t][b]
+            test_data.examples[i].selected_distrib = [selected_distrib[t][b].tolist()
                                                       for t in range(n_steps) if tgt[t][b] != eos_id]
-            test_data.examples[i].selected_indices = [selected_indices[t][b]
+            test_data.examples[i].selected_indices = [selected_indices[t][b].tolist()
                                                       for t in range(n_steps) if tgt[t][b] != eos_id]
 
         if opt.verbose and opt.explore_type != 'translate':
