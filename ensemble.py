@@ -18,24 +18,6 @@ opts.ensemble_opts(parser)
 opt = parser.parse_args()
 
 
-def get_batch_stats(batch, tgt, bos_id, eos_id):
-    stats = onmt.Statistics()
-    gold = batch.tgt.data.clone()
-    pred = tgt.clone()
-
-    # TODO: it's counted in wrong way.
-    pred_mask = (pred != bos_id) * (pred != eos_id)
-    stats.n_words = pred_mask.sum()
-    if gold.size(0) < pred.size(0):
-        pred = pred.narrow(0, 0, gold.size(0))
-        pred_mask = pred_mask.narrow(0, 0, gold.size(0))
-    elif pred.size(0) < gold.size(0):
-        gold = gold.narrow(0, 0, pred.size(0))
-    matched = (pred == gold) * pred_mask
-    stats.n_correct = matched.sum()
-    return stats
-
-
 def load_translators():
     dummy_parser = argparse.ArgumentParser(description='train.py')
     opts.model_opts(dummy_parser)
@@ -114,10 +96,11 @@ def ensemble():
         tgt = torch.stack(tgt)
         n_steps = len(tgt)
 
-        print(bid)
+        outputs = {}
         for b, i in enumerate(batch.indices.data.tolist()):
             effective_steps = list(itertools.takewhile(lambda s: tgt[s][b] != eos_id, range(n_steps)))
-            print(' '.join(itos[tgt[step][b]] for step in effective_steps), file=output_handler)
+            outputs[i] = ' '.join(itos[tgt[step][b]] for step in effective_steps)
+        print('\n'.join(s for i, s in sorted(outputs.items(), key=lambda x: x[0])), file=output_handler)
 
 
 if __name__ == "__main__":
