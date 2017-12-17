@@ -81,7 +81,7 @@ def ensemble():
     test_iter = onmt.IO.OrderedIterator(
         dataset=test_data, batch_size=opt.batch_size,
         device=opt.gpu,
-        train=False, sort=False,
+        train=False, sort=True,
         shuffle=False)
 
     tgt_vocab = translators[0].fields['tgt'].vocab
