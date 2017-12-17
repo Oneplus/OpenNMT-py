@@ -10,6 +10,7 @@ import opts
 import torch
 from torch.autograd import Variable
 import glob
+import itertools
 
 parser = argparse.ArgumentParser(description='ensemble.py')
 opts.add_md_help_argument(parser)
@@ -80,7 +81,7 @@ def ensemble():
     test_iter = onmt.IO.OrderedIterator(
         dataset=test_data, batch_size=opt.batch_size,
         device=opt.gpu,
-        train=False, sort=True,
+        train=False, sort=False,
         shuffle=False)
 
     tgt_vocab = translators[0].fields['tgt'].vocab
@@ -104,14 +105,16 @@ def ensemble():
 
         n_translators_mask = tt.FloatTensor(batch.batch_size, len(tgt_vocab.itos)).fill_(len(translators))
         end_mask = tt.ByteTensor(batch.batch_size).fill_(0)
-        n_steps = batch.tgt.size(0) if opt.explore_type == 'teacher_forcing' else opt.max_sent_length
+
+        # steps includes the <s> symbol
+        n_steps = batch.tgt.size(0) if opt.explore_type == 'teacher_forcing' else opt.max_sent_length + 1
 
         inp_tensor = tt.LongTensor(batch.batch_size).fill_(bos_id)
         inp = var(inp_tensor).view(1, -1)
         tgt = []
         selected_distrib = []
         selected_indices = []
-        for step in range(n_steps):
+        for step in range(1, n_steps):
             output = tt.FloatTensor(batch.batch_size, len(tgt_vocab.itos)).zero_()
             for j in range(len(translators)):
                 dec_states, context = payloads[j]
@@ -123,10 +126,9 @@ def ensemble():
             if opt.explore_type == 'teacher_forcing':
                 output *= opt.distill_alpha
                 output[:, batch.tgt.data[step]] += 1. - opt.distill_alpha
-            values, indices = torch.topk(output, opt.topk)
+            distrib, indices = torch.topk(output, opt.topk)
 
-            tgt.append(inp_tensor.view(-1))
-            selected_distrib.append(values)
+            selected_distrib.append(distrib)
             selected_indices.append(indices)
 
             if opt.renormalize:
@@ -140,11 +142,12 @@ def ensemble():
             elif opt.explore_type == 'translate':
                 inp_tensor = indices[:, 0].contiguous().view(1, -1)
             else:
-                ind = torch.distributions.Categorical(values).sample().view(-1, 1)
+                ind = torch.distributions.Categorical(distrib).sample().view(-1, 1)
                 inp_tensor = indices.gather(1, ind).view(1, -1)
 
             inp_tensor.masked_fill_(end_mask, eos_id)
             end_mask = (inp_tensor == eos_id)
+            tgt.append(inp_tensor.view(-1))
 
             inp = var(inp_tensor)
 
@@ -161,11 +164,12 @@ def ensemble():
             report_stats.output(0, bid + 1, len(test_iter), report_stats.start_time)
 
         for b, i in enumerate(batch.indices.data.tolist()):
-            test_data.examples[i].tgt = [tgt_vocab.itos[tgt[t][b]] for t in range(n_steps) if tgt[t][b] != eos_id]
-            test_data.examples[i].selected_distrib = [selected_distrib[t][b].tolist()
-                                                      for t in range(n_steps) if tgt[t][b] != eos_id]
-            test_data.examples[i].selected_indices = [selected_indices[t][b].tolist()
-                                                      for t in range(n_steps) if tgt[t][b] != eos_id]
+            effective_steps = list(itertools.takewhile(lambda step: tgt[step][b] != eos_id, range(n_steps)))
+            test_data.examples[i].tgt = tuple([tgt_vocab.itos[tgt[step][b]] for step in effective_steps])
+
+            effective_steps = effective_steps + [effective_steps[-1] + 1]
+            test_data.examples[i].selected_distrib = [selected_distrib[step][b].tolist() for step in effective_steps]
+            test_data.examples[i].selected_indices = [selected_indices[step][b].tolist() for step in effective_steps]
 
         if opt.verbose and opt.explore_type != 'translate':
             for i in batch.indices.data.tolist():
@@ -194,7 +198,7 @@ def ensemble():
     else:
         output_handler = codecs.open(opt.output, 'w', encoding='utf-8')
         for example in test_data.examples:
-            print(' '.join(example.tgt[1:]), file=output_handler)
+            print(' '.join(example.tgt), file=output_handler)
 
 
 if __name__ == "__main__":
