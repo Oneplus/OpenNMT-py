@@ -143,8 +143,8 @@ class NMTCrossEntropyLossCompute(LossComputeBase):
         return {
             "output": output,
             "target": batch.tgt[range_[0] + 1: range_[1]],
-            "targets": batch.selected_indices[range_[0] + 1: range_[1]],
-            "distrib": batch.selected_distrib[range_[0] + 1: range_[1]],
+            "targets": batch.selected_indices[range_[0]: range_[1] - 1],
+            "distrib": batch.selected_distrib[range_[0]: range_[1] - 1],
         }
 
     def compute_loss(self, batch, output, target, targets, distrib):

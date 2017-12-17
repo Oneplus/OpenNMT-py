@@ -261,6 +261,7 @@ def load_fields(train, valid, checkpoint):
         pad_info = torch.load(opt.data + '.pad.pt')
         for k in pad_info:
             assert k in fields
+            assert k != 'init_token'
             for f in pad_info[k]:
                 setattr(fields[k], f, pad_info[k][f])
 
