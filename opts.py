@@ -312,7 +312,7 @@ def translate_opts(parser):
     _generic_translate_opts(parser)
 
 
-def _ensemble_opts(parser):
+def _generate_opts(parser):
     parser.add_argument('-models', required=True, help='Path to several models\' .pt file.')
     parser.add_argument('-data', required=True, help='Path to the data .pt file.')
     parser.add_argument('-vocab', required=True, help='Path to the vocab .pt file.')
@@ -338,10 +338,28 @@ def _ensemble_opts(parser):
                         help="Print stats at this interval.")
 
 
+def generate_opts(parser):
+    _generate_opts(parser)
+    _generic_translate_opts(parser)
+
+
+def _ensemble_opts(parser):
+    parser.add_argument('-models', required=True,
+                        help='Path to model .pt file')
+    parser.add_argument('-src', required=True,
+                        help="""Source sequence to decode (one line per
+                            sequence)""")
+    parser.add_argument('-src_img_dir', default="",
+                        help='Source image directory')
+    parser.add_argument('-tgt',
+                        help='True target sequence (optional)')
+    parser.add_argument('-beam_size', type=int, default=1,
+                        help='Beam size')
+
+
 def ensemble_opts(parser):
     _ensemble_opts(parser)
     _generic_translate_opts(parser)
-
 
 def add_md_help_argument(parser):
     parser.add_argument('-md', action=MarkdownHelpAction,
