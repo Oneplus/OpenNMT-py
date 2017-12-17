@@ -137,8 +137,7 @@ def ensemble():
             if opt.explore_type == 'teacher_forcing':
                 inp_tensor = batch.tgt[step].data.view(1, -1)
             elif opt.explore_type == 'epsilon_greedy':
-                # TODO
-                raise NotImplementedError('not implemented')
+                pass
             elif opt.explore_type == 'translate':
                 inp_tensor = indices[:, 0].contiguous().view(1, -1)
             else:
@@ -166,8 +165,6 @@ def ensemble():
         for b, i in enumerate(batch.indices.data.tolist()):
             effective_steps = list(itertools.takewhile(lambda step: tgt[step][b] != eos_id, range(n_steps)))
             test_data.examples[i].tgt = tuple([tgt_vocab.itos[tgt[step][b]] for step in effective_steps])
-
-            effective_steps = effective_steps + [effective_steps[-1] + 1]
             test_data.examples[i].selected_distrib = [selected_distrib[step][b].tolist() for step in effective_steps]
             test_data.examples[i].selected_indices = [selected_indices[step][b].tolist() for step in effective_steps]
 
