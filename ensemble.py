@@ -95,6 +95,16 @@ def ensemble():
     eos_id = tgt_vocab.stoi[onmt.IO.EOS_WORD]
     softmax = torch.nn.Softmax()
 
+    def transit(batch, inp):
+        output = tt.FloatTensor(batch.batch_size, len(tgt_vocab.itos)).zero_()
+        for j in range(len(translators)):
+            dec_states, context = payloads[j]
+            output_, dec_states = translators[j].step(inp, context, dec_states, context_lengths)
+            output += output_.view(batch.batch_size, -1)
+            payloads[j] = dec_states, context
+        output = output.div(n_translators_mask)
+        return output
+
     for bid, batch in enumerate(test_iter):
         payloads = []
         _, src_lengths = batch.src
@@ -107,7 +117,7 @@ def ensemble():
         end_mask = tt.ByteTensor(batch.batch_size).fill_(0)
 
         # steps includes the <s> symbol
-        n_steps = batch.tgt.size(0) if opt.explore_type == 'teacher_forcing' else opt.max_sent_length + 1
+        n_steps = batch.tgt.size(0) if opt.explore_type == 'teacher_forcing' else opt.max_sent_length
 
         inp_tensor = tt.LongTensor(batch.batch_size).fill_(bos_id)
         inp = var(inp_tensor).view(1, -1)
@@ -115,24 +125,16 @@ def ensemble():
         selected_distrib = []
         selected_indices = []
         for step in range(1, n_steps):
-            output = tt.FloatTensor(batch.batch_size, len(tgt_vocab.itos)).zero_()
-            for j in range(len(translators)):
-                dec_states, context = payloads[j]
-                output_, dec_states = translators[j].step(inp, context, dec_states, context_lengths)
-                output += output_.view(batch.batch_size, -1)
-                payloads[j] = dec_states, context
-            output = output.div(n_translators_mask)
-
+            output = transit(batch, inp)
             if opt.explore_type == 'teacher_forcing':
                 output *= opt.distill_alpha
                 output[:, batch.tgt.data[step]] += 1. - opt.distill_alpha
             distrib, indices = torch.topk(output, opt.topk)
+            if opt.renormalize:
+                distrib = softmax(tt.exp(distrib))
 
             selected_distrib.append(distrib)
             selected_indices.append(indices)
-
-            if opt.renormalize:
-                values = softmax(tt.exp(values))
 
             if opt.explore_type == 'teacher_forcing':
                 inp_tensor = batch.tgt[step].data.view(1, -1)
@@ -152,6 +154,19 @@ def ensemble():
 
             if end_mask.sum() == batch.batch_size:
                 break
+        if end_mask.sum() != batch.batch_size:
+            # loop stop when not all batch ends and step reach the maximum
+            inp_tensor.masked_fill_(tt.ByteTensor(batch.batch_size).fill_(1), eos_id)
+            inp = var(inp_tensor)
+            tgt.append(inp_tensor.view(-1))
+            output = transit(batch, inp)
+            distrib, indices = torch.topk(output, opt.topk)
+            if opt.renormalize:
+                distrib = softmax(tt.exp(distrib))
+
+            selected_distrib.append(distrib)
+            selected_indices.append(indices)
+            n_steps += 1
 
         tgt = torch.stack(tgt)
         selected_distrib = torch.stack(selected_distrib)
@@ -165,6 +180,8 @@ def ensemble():
         for b, i in enumerate(batch.indices.data.tolist()):
             effective_steps = list(itertools.takewhile(lambda step: tgt[step][b] != eos_id, range(n_steps)))
             test_data.examples[i].tgt = tuple([tgt_vocab.itos[tgt[step][b]] for step in effective_steps])
+
+            effective_steps = effective_steps + [effective_steps[-1] + 1]
             test_data.examples[i].selected_distrib = [selected_distrib[step][b].tolist() for step in effective_steps]
             test_data.examples[i].selected_indices = [selected_indices[step][b].tolist() for step in effective_steps]
 
