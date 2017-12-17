@@ -181,16 +181,15 @@ def ensemble():
         test_data.fields = []
         torch.save(test_data, open(opt.save_data + '.pt', 'wb'))
 
+        # For selected_indices and selected_distrib, init_token is not needed.
         pad_info = {
             'selected_indices': {
                 'eos_token': [fields['tgt'].vocab.stoi[fields['tgt'].eos_token]] * opt.topk,
                 'pad_token': [fields['tgt'].vocab.stoi[fields['tgt'].pad_token]] * opt.topk,
-                'init_token': [fields['tgt'].vocab.stoi[fields['tgt'].init_token]] * opt.topk,
             },
             'selected_distrib': {
                 'eos_token': [0.] * opt.topk,
                 'pad_token': [0.] * opt.topk,
-                'init_token': [0.] * opt.topk,
             }
         }
         torch.save(pad_info, open(opt.save_pad + '.pt', 'wb'))
