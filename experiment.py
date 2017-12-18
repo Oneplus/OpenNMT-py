@@ -54,7 +54,8 @@ def main():
                 '-data', '{dir}/data'.format(dir=directory),
                 '-save_model', '{dir}/distill-model'.format(dir=directory),
                 '-rnn_size', '256',
-                '-gpuid', '0']
+                '-gpuid', '0',
+                '-epochs', '30']
         print(' '.join(cmds), file=handler)
 
 

@@ -182,7 +182,7 @@ def ensemble():
             test_data.examples[i].selected_distrib = [selected_distrib[step][b].tolist() for step in effective_steps]
             test_data.examples[i].selected_indices = [selected_indices[step][b].tolist() for step in effective_steps]
 
-        if opt.verbose:
+        if opt.verbose and opt.explore_type != 'translate':
             for i in batch.indices.data.tolist():
                 print(test_data.examples[i].tgt)
                 print(test_data.examples[i].selected_distrib)
