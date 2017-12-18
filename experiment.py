@@ -60,12 +60,12 @@ def main():
 
     with open(os.path.join(directory, 'translate.sh'), 'w') as handler:
         cmds = ['python', 'translate.py',
-                '-gpu', '0'
-                '-model', '{dir}/distill-model'.format(dir=directory),
+                '-gpu', '0',
+                '-model', '{dir}/distill-model.pt'.format(dir=directory),
                 '-beam_size', '1']
         for fold in ('test', 'val'):
-            extra_cmds = ['-src', 'data/src-{fold}'.format(fold=fold),
-                          '-tgt', 'data/tgt-{fold}'.format(fold=fold),
+            extra_cmds = ['-src', 'data/src-{fold}.txt'.format(fold=fold),
+                          '-tgt', 'data/tgt-{fold}.txt'.format(fold=fold),
                           '-output', '{dir}/{fold}-output.txt'.format(dir=directory, fold=fold)]
             print(' '.join(cmds + extra_cmds), file=handler)
 
