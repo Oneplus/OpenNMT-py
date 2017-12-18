@@ -29,7 +29,7 @@ def main():
         models = './model/lstm.h256.seed*.pt'
 
     # Generate scripts
-    cmds = ['python', 'generate.py',
+    cmds = ['nohup', 'python', 'generate.py',
             '-vocab', 'iwslt2014/data.vocab',
             '-save_pad', '{dir}/data.pad'.format(dir=directory),
             '-models', '\'{models}\''.format(models=models),
@@ -46,17 +46,19 @@ def main():
         for fold in ('train', 'valid'):
             extra_cmds = ['-data', 'iwslt2014/data.{fold}'.format(fold=fold),
                           '-save_data', '{dir}/data.{fold}'.format(dir=directory, fold=fold)]
-            print(' '.join(cmds + extra_cmds), file=handler)
+            log_cmds = ['>', '{dir}/generate.log'.format(dir=directory), '&']
+            print(' '.join(cmds + extra_cmds + log_cmds), file=handler)
 
     with open(os.path.join(directory, 'distill.sh'), 'w') as handler:
-        cmds = ['python', 'train.py',
+        cmds = ['nohup', 'python', 'train.py',
                 '-distill',
                 '-data', '{dir}/data'.format(dir=directory),
                 '-save_model', '{dir}/distill-model'.format(dir=directory),
                 '-rnn_size', '256',
                 '-gpuid', '0',
                 '-epochs', '30']
-        print(' '.join(cmds), file=handler)
+        log_cmds = ['>', '{dir}/distill.log'.format(dir=directory), '&']
+        print(' '.join(cmds + log_cmds), file=handler)
 
     with open(os.path.join(directory, 'translate.sh'), 'w') as handler:
         cmds = ['python', 'translate.py',
