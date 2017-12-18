@@ -138,6 +138,7 @@ class NMTCrossEntropyLossCompute(LossComputeBase):
     """
     def __init__(self, generator, tgt_vocab):
         super(NMTCrossEntropyLossCompute, self).__init__(generator, tgt_vocab)
+        self.criterion = nn.KLDivLoss(size_average=False)
 
     def make_shard_state(self, batch, output, range_, attns=None):
         return {
@@ -157,8 +158,8 @@ class NMTCrossEntropyLossCompute(LossComputeBase):
         targets = targets.view(-1, targets.size()[-1])
         distrib = distrib.view(-1, distrib.size()[-1])
 
-        loss = scores.gather(dim=1, index=targets) * distrib
-        loss = -loss.sum()
+        loss = self.criterion(scores.gather(dim=1, index=targets), distrib)
+        # loss = -loss.sum()
         loss_data = loss.data.clone()
 
         stats = self.stats(loss_data, scores_data, target_data)

@@ -29,47 +29,52 @@ def main():
         models = './model/lstm.h256.seed*.pt'
 
     # Generate scripts
-    cmds = ['nohup', 'python', 'generate.py',
-            '-vocab', 'iwslt2014/data.vocab',
-            '-save_pad', '{dir}/data.pad'.format(dir=directory),
-            '-models', '\'{models}\''.format(models=models),
-            '-explore_type', '{explore}'.format(explore=opts.explore_type),
-            '-report_every', '1',
-            '-topk', '{k}'.format(k=opts.topk),
-            '-gpu', '0']
     if explore_type == 'teacher_forcing':
         cmds.extend(['-distill_alpha', '{alpha}'.format(alpha=opts.alpha)])
     elif explore_type == 'epsilon_greedy':
         cmds.extend(['-epsilon_greedy_epsilon', '{epsilon}'.format(epsilon=epsilon)])
 
     with open(os.path.join(directory, 'generate.sh'), 'w') as handler:
+        cmds = ['python', 'generate.py',
+                '-vocab', 'iwslt2014/data.vocab',
+                '-save_pad', '{dir}/data.pad'.format(dir=directory),
+                '-models', '\'{models}\''.format(models=models),
+                '-explore_type', '{explore}'.format(explore=opts.explore_type),
+                '-report_every', '1',
+                '-topk', '{k}'.format(k=opts.topk),
+                '-gpu', '0']
         for fold in ('train', 'valid'):
             extra_cmds = ['-data', 'iwslt2014/data.{fold}'.format(fold=fold),
                           '-save_data', '{dir}/data.{fold}'.format(dir=directory, fold=fold)]
-            log_cmds = ['>', '{dir}/generate.log'.format(dir=directory), '&']
-            print(' '.join(cmds + extra_cmds + log_cmds), file=handler)
-
-    with open(os.path.join(directory, 'distill.sh'), 'w') as handler:
-        cmds = ['nohup', 'python', 'train.py',
-                '-distill',
-                '-data', '{dir}/data'.format(dir=directory),
-                '-save_model', '{dir}/distill-model'.format(dir=directory),
-                '-rnn_size', '256',
-                '-gpuid', '0',
-                '-epochs', '30']
-        log_cmds = ['>', '{dir}/distill.log'.format(dir=directory), '&']
-        print(' '.join(cmds + log_cmds), file=handler)
-
-    with open(os.path.join(directory, 'translate.sh'), 'w') as handler:
-        cmds = ['python', 'translate.py',
-                '-gpu', '0',
-                '-model', '{dir}/distill-model.pt'.format(dir=directory),
-                '-beam_size', '1']
-        for fold in ('test', 'val'):
-            extra_cmds = ['-src', 'data/src-{fold}.txt'.format(fold=fold),
-                          '-tgt', 'data/tgt-{fold}.txt'.format(fold=fold),
-                          '-output', '{dir}/{fold}-output.txt'.format(dir=directory, fold=fold)]
             print(' '.join(cmds + extra_cmds), file=handler)
+
+    for optim in ('adam', 'sgd'):
+        optim_cmds = ['-optim', optim]
+        if optim == 'adam':
+            optim_cmds += ['-learning_rate', '0.001']
+        with open(os.path.join(directory, 'distill_{optim}.sh'.format(optim=optim)), 'w') as handler:
+            cmds = ['nohup', 'python', 'train.py',
+                    '-distill',
+                    '-data', '{dir}/data'.format(dir=directory),
+                    '-save_model', '{dir}/distill-model-{optim}'.format(dir=directory, optim=optim),
+                    '-rnn_size', '256',
+                    '-gpuid', '0',
+                    '-seed', '1',
+                    '-epochs', '30']
+            log_cmds = ['>', '{dir}/distill_{optim}.log'.format(dir=directory, optim=optim), '&']
+            print(' '.join(cmds + optim_cmds + log_cmds), file=handler)
+
+        with open(os.path.join(directory, 'translate_{optim}.sh'.format(optim=optim)), 'w') as handler:
+            cmds = ['python', 'translate.py',
+                    '-gpu', '0',
+                    '-model', '{dir}/distill-model-{optim}.pt'.format(dir=directory, optim=optim),
+                    '-beam_size', '1']
+            for fold in ('test', 'val'):
+                extra_cmds = [
+                    '-src', 'data/src-{fold}.txt'.format(fold=fold),
+                    '-tgt', 'data/tgt-{fold}.txt'.format(fold=fold),
+                    '-output', '{dir}/{fold}-{optim}-output.txt'.format(dir=directory, optim=optim, fold=fold)]
+                print(' '.join(cmds + extra_cmds), file=handler)
 
 
 if __name__ == "__main__":
