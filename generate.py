@@ -21,7 +21,7 @@ if opt.seed > 0:
     torch.manual_seed(opt.seed)
 
 if opt.gpu > -1:
-    cuda.set_device(opt.gpu)
+    torch.cuda.set_device(opt.gpu)
     if opt.seed > 0:
         torch.cuda.manual_seed(opt.seed)
 
