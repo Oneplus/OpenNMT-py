@@ -159,7 +159,7 @@ def generate():
 
             distrib, indices = torch.topk(output, opt.topk)
             if opt.renormalize:
-                distrib = softmax(var(tt.log(distrib)))
+                distrib = softmax(var(tt.log(distrib))).data
 
             selected_distrib.append(distrib)
             selected_indices.append(indices)
