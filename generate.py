@@ -122,7 +122,7 @@ def generate():
                 output[:, batch.tgt.data[step]] += 1. - opt.distill_alpha
             distrib, indices = torch.topk(output, opt.topk)
             if opt.renormalize:
-                distrib = softmax(var(tt.log(distrib))).data
+                distrib = softmax(var(torch.log(distrib))).data
 
             selected_distrib.append(distrib)
             selected_indices.append(indices)
@@ -159,7 +159,7 @@ def generate():
 
             distrib, indices = torch.topk(output, opt.topk)
             if opt.renormalize:
-                distrib = softmax(var(tt.log(distrib))).data
+                distrib = softmax(var(torch.log(distrib))).data
 
             selected_distrib.append(distrib)
             selected_indices.append(indices)
