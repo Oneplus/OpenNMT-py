@@ -3,7 +3,6 @@ from __future__ import print_function
 from __future__ import division
 import argparse
 import random
-import codecs
 import onmt
 import onmt.IO
 import opts
@@ -17,18 +16,14 @@ opts.add_md_help_argument(parser)
 opts.generate_opts(parser)
 
 opt = parser.parse_args()
-random.seed(opt.seed)
-torch.manual_seed(opt.seed)
+if opt.seed > 0:
+    random.seed(opt.seed)
+    torch.manual_seed(opt.seed)
 
-
-def stoi(sent, str2index):
-    sent = sent + ' ' + onmt.IO.EOS_WORD
-    return [str2index[word] for word in sent.split()]
-
-
-def itos(indices, distrib, index2str):
-    return map(list, zip(*[(index2str[i], p)
-                           for i, p in zip(indices, distrib) if index2str[i] != onmt.IO.PAD_WORD]))
+if opt.gpu > -1:
+    cuda.set_device(opt.gpu)
+    if opt.seed > 0:
+        torch.cuda.manual_seed(opt.seed)
 
 
 def get_batch_stats(batch, tgt, bos_id, eos_id):
@@ -65,7 +60,7 @@ def load_translators():
     return translators
 
 
-def ensemble():
+def generate():
     opt.cuda = opt.gpu > -1
     if opt.cuda:
         torch.cuda.set_device(opt.gpu)
@@ -95,16 +90,6 @@ def ensemble():
     eos_id = tgt_vocab.stoi[onmt.IO.EOS_WORD]
     softmax = torch.nn.Softmax()
 
-    def transit(batch, inp):
-        output = tt.FloatTensor(batch.batch_size, len(tgt_vocab.itos)).zero_()
-        for j in range(len(translators)):
-            dec_states, context = payloads[j]
-            output_, dec_states = translators[j].step(inp, context, dec_states, context_lengths)
-            output += output_.view(batch.batch_size, -1)
-            payloads[j] = dec_states, context
-        output = output.div(n_translators_mask)
-        return output
-
     for bid, batch in enumerate(test_iter):
         payloads = []
         _, src_lengths = batch.src
@@ -113,7 +98,6 @@ def ensemble():
             context, dec_states = translator.init_decoder_state(batch, test_data)
             payloads.append((dec_states, context))
 
-        n_translators_mask = tt.FloatTensor(batch.batch_size, len(tgt_vocab.itos)).fill_(len(translators))
         end_mask = tt.ByteTensor(batch.batch_size).fill_(0)
 
         # steps includes the <s> symbol
@@ -125,13 +109,20 @@ def ensemble():
         selected_distrib = []
         selected_indices = []
         for step in range(1, n_steps):
-            output = transit(batch, inp)
+            output = tt.FloatTensor(batch.batch_size, len(tgt_vocab.itos)).zero_()
+            for j in range(len(translators)):
+                dec_states, context = payloads[j]
+                output_, dec_states = translators[j].step(inp, context, dec_states, context_lengths)
+                output += output_.view(batch.batch_size, -1)
+                payloads[j] = dec_states, context
+            output.div_(len(translators))
+
             if opt.explore_type == 'teacher_forcing':
                 output *= opt.distill_alpha
                 output[:, batch.tgt.data[step]] += 1. - opt.distill_alpha
             distrib, indices = torch.topk(output, opt.topk)
             if opt.renormalize:
-                distrib = softmax(tt.exp(distrib))
+                distrib = softmax(var(tt.log(distrib))).data
 
             selected_distrib.append(distrib)
             selected_indices.append(indices)
@@ -157,10 +148,18 @@ def ensemble():
             inp_tensor.masked_fill_(tt.ByteTensor(batch.batch_size).fill_(1), eos_id)
             inp = var(inp_tensor)
             tgt.append(inp_tensor.view(-1))
-            output = transit(batch, inp)
+
+            output = tt.FloatTensor(batch.batch_size, len(tgt_vocab.itos)).zero_()
+            for j in range(len(translators)):
+                dec_states, context = payloads[j]
+                output_, dec_states = translators[j].step(inp, context, dec_states, context_lengths)
+                output += output_.view(batch.batch_size, -1)
+                payloads[j] = dec_states, context
+            output.div_(len(translators))
+
             distrib, indices = torch.topk(output, opt.topk)
             if opt.renormalize:
-                distrib = softmax(tt.exp(distrib))
+                distrib = softmax(var(tt.log(distrib)))
 
             selected_distrib.append(distrib)
             selected_indices.append(indices)
@@ -175,14 +174,14 @@ def ensemble():
             report_stats.output(0, bid + 1, len(test_iter), report_stats.start_time)
 
         for b, i in enumerate(batch.indices.data.tolist()):
-            effective_steps = list(itertools.takewhile(lambda step: tgt[step][b] != eos_id, range(n_steps)))
+            effective_steps = list(itertools.takewhile(lambda s: tgt[s][b] != eos_id, range(n_steps)))
             test_data.examples[i].tgt = tuple([tgt_vocab.itos[tgt[step][b]] for step in effective_steps])
 
             effective_steps = effective_steps + [effective_steps[-1] + 1]
             test_data.examples[i].selected_distrib = [selected_distrib[step][b].tolist() for step in effective_steps]
             test_data.examples[i].selected_indices = [selected_indices[step][b].tolist() for step in effective_steps]
 
-        if opt.verbose and opt.explore_type != 'translate':
+        if opt.verbose:
             for i in batch.indices.data.tolist():
                 print(test_data.examples[i].tgt)
                 print(test_data.examples[i].selected_distrib)
@@ -207,4 +206,4 @@ def ensemble():
 
 
 if __name__ == "__main__":
-    ensemble()
+    generate()

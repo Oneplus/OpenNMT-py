@@ -10,6 +10,7 @@ def main():
     cmd.add_argument('-alpha', default=1., help='the alpha, only used when explore_type=teacher forcing.')
     cmd.add_argument('-epsilon', default=0, help='the epsilon in the ')
     cmd.add_argument('-topk', required=True, type=int, help='the number of k-best')
+    cmd.add_argument('-renormalize', default=False, action='store_true', help='do re-normalize.')
     opts = cmd.parse_args()
     explore_type = opts.explore_type
     assert explore_type in ('teacher_forcing', 'boltzmann', 'epsilon_greedy')
@@ -18,7 +19,7 @@ def main():
     elif explore_type == 'epsilon_greedy':
         explore_type += '_{0}'.format(opts.epsilon)
 
-    params = 'x{0}.{1}.top{2}'.format(opts.n, explore_type, opts.topk)
+    params = 'x{0}.{1}.top{2}.{3}'.format(opts.n, explore_type, opts.topk, 'norm' if opts.renormalize else 'nonorm')
     directory = os.path.join('saves', params)
     if not os.path.isdir(directory):
         os.makedirs(directory)
@@ -43,6 +44,8 @@ def main():
                 '-report_every', '1',
                 '-topk', '{k}'.format(k=opts.topk),
                 '-gpu', '0']
+        if opts.renormalize:
+            cmds = cmds + ['-renormalize']
         for fold in ('train', 'valid'):
             extra_cmds = ['-data', 'iwslt2014/data.{fold}'.format(fold=fold),
                           '-save_data', '{dir}/data.{fold}'.format(dir=directory, fold=fold)]
