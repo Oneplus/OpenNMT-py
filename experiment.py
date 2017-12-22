@@ -66,7 +66,7 @@ def main():
                     '-seed', '1',
                     '-epochs', '30',
                     '-valid_txt', 'data/src-val.txt',
-                    '-valid_output', '{dir}/val-runtime-output.txt',
+                    '-valid_output', '{dir}/val-runtime-output.txt'.format(dir=directory),
                     '-valid_script', './tools/iwslt_val_bleu.sh']
             log_cmds = ['>', '{dir}/distill_{optim}.log'.format(dir=directory, optim=optim), '&']
             print(' '.join(cmds + optim_cmds + log_cmds), file=handler)
