@@ -247,6 +247,11 @@ def train_opts(parser):
     parser.add_argument('-exp', type=str, default="",
                         help="Name of the experiment for logging.")
 
+    # external evaluation
+    parser.add_argument('-valid_txt', help='The path to the raw validation.')
+    parser.add_argument('-valid_output', help='The path to the validation.')
+    parser.add_argument('-valid_script', help='The evaluation command')
+
 
 def train_distill_opts(parser):
     parser.add_argument('-distill', action='store_true', default=False, help='If distill.')
@@ -360,6 +365,7 @@ def _ensemble_opts(parser):
 def ensemble_opts(parser):
     _ensemble_opts(parser)
     _generic_translate_opts(parser)
+
 
 def add_md_help_argument(parser):
     parser.add_argument('-md', action=MarkdownHelpAction,

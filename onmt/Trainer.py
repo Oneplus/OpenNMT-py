@@ -164,7 +164,7 @@ class Trainer(object):
         """ Called for each epoch to update learning rate. """
         return self.optim.updateLearningRate(ppl, epoch)
 
-    def drop_checkpoint(self, opt, epoch, fields, valid_stats):
+    def drop_checkpoint(self, opt, epoch, fields, valid_stats, is_dummy=False):
         """ Called conditionally each epoch to save a snapshot. """
         real_model = (self.model.module
                       if isinstance(self.model, nn.DataParallel)
@@ -185,4 +185,8 @@ class Trainer(object):
             'epoch': epoch,
             'optim': self.optim
         }
-        torch.save(checkpoint, '{0:s}.pt'.format(opt.save_model))
+        if is_dummy:
+            torch.save(checkpoint, '{0:s}.dummy.pt'.format(opt.save_model))
+        else:
+            torch.save(checkpoint, '{0:s}.pt'.format(opt.save_model))
+

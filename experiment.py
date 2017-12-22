@@ -29,6 +29,7 @@ def main():
     else:
         models = './model/lstm.h256.seed*.pt'
 
+    cmds = []
     # Generate scripts
     if explore_type == 'teacher_forcing':
         cmds.extend(['-distill_alpha', '{alpha}'.format(alpha=opts.alpha)])
@@ -63,7 +64,10 @@ def main():
                     '-rnn_size', '256',
                     '-gpuid', '0',
                     '-seed', '1',
-                    '-epochs', '30']
+                    '-epochs', '30',
+                    '-valid_txt', 'data/src-val.txt',
+                    '-valid_output', '{dir}/val-runtime-output.txt',
+                    '-valid_script', './tools/iwslt_val_bleu.sh']
             log_cmds = ['>', '{dir}/distill_{optim}.log'.format(dir=directory, optim=optim), '&']
             print(' '.join(cmds + optim_cmds + log_cmds), file=handler)
 
@@ -71,7 +75,8 @@ def main():
             cmds = ['python', 'translate.py',
                     '-gpu', '0',
                     '-model', '{dir}/distill-model-{optim}.pt'.format(dir=directory, optim=optim),
-                    '-beam_size', '1']
+                    '-beam_size', '1',
+                    '-max_sent_length', '50']
             for fold in ('test', 'val'):
                 extra_cmds = [
                     '-src', 'data/src-{fold}.txt'.format(fold=fold),

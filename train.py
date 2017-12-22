@@ -17,6 +17,11 @@ import onmt.modules
 from onmt.Utils import aeq, use_gpu
 import opts
 import random
+import subprocess
+import shutil
+import codecs
+from types import SimpleNamespace
+
 
 parser = argparse.ArgumentParser(
     description='train.py',
@@ -150,38 +155,58 @@ def fvar(v):
     return Variable(torch.FloatTensor(v)).cuda()
 
 
-def get_sorted_prob(train_data, prob):
-    src_lengths = [len(src_data) for src_data in train_data.src]
-    _, sorted_prob = map(list, zip(*sorted(map(list, zip(src_lengths, prob)), key=lambda x: -x[0])))
-    
-    batch_probs = []
-    start, batch_size, total = 0, opt.batch_size, len(sorted_prob)
-    while start < total:
-        if start + batch_size <= total: 
-            batch_prob = sorted_prob[start: start + batch_size]
-        else:
-            batch_prob = sorted_prob[start:]
-        start += batch_size
+def make_translate_opt():
+    output = opt.valid_output if hasattr(opt, 'valid_output') and opt.valid_output is not None else 'pred.txt'
+    opt_dict = {
+        'output': output,
+        'batch_size': opt.batch_size,
+        'max_sent_length': 50,
+        'replace_unk': True,
+        'attn_debug': False,
+        'dump_beam': "",
+        'n_best': 1,
+        'gpu': opt.gpuid[0] if len(opt.gpuid) > 0 else -1,
+        'dynamic_dict': False,
+        'share_vocab': False,
+        'alpha': 0.,
+        'beta': 0.,
+        'model': '{0:s}.dummy.pt'.format(opt.save_model),
+        'src': opt.valid_txt,
+        'src_img_dir': "",
+        'tgt': None,
+        'beam_size': 1,
+        'cuda': len(opt.gpuid) > 0
+    }
+    return SimpleNamespace(**opt_dict)
 
-        blank = [[0.0 for _ in range(opt.topK)], [1 for _ in range(opt.topK)]]
-        
-        max_len = max(len(ex) for ex in batch_prob)
-        step = len(batch_prob)
-        
-        for i in range(step):
-            batch_prob[i] += [blank for _ in range(max_len - len(batch_prob[i]))]
-        
-        weights = []
-        targets = []
 
-        for i in range(opt.topK):
-            for j in range(max_len):
-                for k in range(step):
-                    weights.append(batch_prob[k][j][0][i])
-                    targets.append(batch_prob[k][j][1][i])
-    
-        batch_probs.append((fvar(weights), ivar(targets)))
-    return batch_probs
+def translate():
+    dummy_parser = argparse.ArgumentParser(description='train.py')
+    opts.model_opts(dummy_parser)
+    dummy_opt = dummy_parser.parse_known_args([])[0]
+
+    translate_opt = make_translate_opt()
+
+    translator = onmt.Translator(translate_opt, dummy_opt.__dict__)
+    out_file = codecs.open(translate_opt.output, 'w', 'utf-8')
+    data = onmt.IO.ONMTDataset(translate_opt.src, translate_opt.tgt, translator.fields, None)
+
+    test_data = onmt.IO.OrderedIterator(
+        dataset=data, device=translate_opt.gpu,
+        batch_size=translate_opt.batch_size, train=False, sort=False,
+        shuffle=False)
+
+    for batch in test_data:
+        pred_batch, gold_batch, pred_scores, gold_scores, attn, src \
+            = translator.translate(batch, data)
+        for pred_sents in pred_batch:
+            n_best_preds = [" ".join(pred) for pred in pred_sents[:translate_opt.n_best]]
+            out_file.write('\n'.join(n_best_preds))
+            out_file.write('\n')
+            out_file.flush()
+    out_file.close()
+    with subprocess.Popen([opt.valid_script, translate_opt.output], stdout=subprocess.PIPE) as proc:
+        return float(proc.stdout.read())
 
 
 def train_model(model, train_data, valid_data, fields, optim):
@@ -190,8 +215,8 @@ def train_model(model, train_data, valid_data, fields, optim):
         assert hasattr(train_data.examples[0], 'selected_indices') and \
                hasattr(train_data.examples[0], 'selected_distrib')
 
-    min_ppl = float('inf')
-    
+    min_ppl, max_bleu = float('inf'), -1
+
     train_iter = make_train_data_iter(train_data, opt)
     valid_iter = make_valid_data_iter(valid_data, opt)
     train_loss = make_loss_compute(model, fields["tgt"].vocab, train_data, opt)
@@ -225,9 +250,20 @@ def train_model(model, train_data, valid_data, fields, optim):
         trainer.epoch_step(valid_stats.ppl(), epoch)
 
         # 5. Drop a checkpoint if needed.
-        if epoch >= opt.start_checkpoint_at and valid_stats.ppl() < min_ppl:
-            trainer.drop_checkpoint(opt, epoch, fields, valid_stats)
-            min_ppl = valid_stats.ppl()
+        if epoch >= opt.start_checkpoint_at:
+            if hasattr(opt, 'valid_txt') and hasattr(opt, 'valid_script'):
+                # 5.1 drop a temp checkpoint
+                trainer.drop_checkpoint(opt, epoch, fields, valid_stats, is_dummy=True)
+                bleu = translate()
+                if bleu > max_bleu:
+                    max_bleu = bleu
+                    shutil.move('{0:s}.dummy.pt'.format(opt.save_model), '{0:s}.pt'.format(opt.save_model))
+                    print('Save model according to best bleu: {0} ...'.format(max_bleu))
+            elif valid_stats.ppl() < min_ppl:
+                # 5.2 drop checkpoint when smaller ppl is achieved.
+                min_ppl = valid_stats.ppl()
+                trainer.drop_checkpoint(opt, epoch, fields, valid_stats)
+                print('Save model according to lowest-ever ppl: {0} ...'.format(min_ppl))
 
 
 def check_save_model_path():
