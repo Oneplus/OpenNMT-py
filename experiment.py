@@ -39,17 +39,25 @@ def main():
                 '-topk', '{k}'.format(k=opts.topk),
                 '-gpu', '0']
         # Generate scripts
-        if explore_type == 'teacher_forcing':
+        if opts.explore_type == 'teacher_forcing':
             cmds.extend(['-distill_alpha', '{alpha}'.format(alpha=opts.alpha)])
-        elif explore_type == 'epsilon_greedy':
+        elif opts.explore_type == 'epsilon_greedy':
             cmds.extend(['-epsilon_greedy_epsilon', '{epsilon}'.format(epsilon=opts.epsilon)])
 
         if opts.renormalize:
-            cmds = cmds + ['-renormalize']
-        for fold in ('train', 'valid'):
-            extra_cmds = ['-data', 'iwslt2014/data.{fold}'.format(fold=fold),
-                          '-save_data', '{dir}/data.{fold}'.format(dir=directory, fold=fold)]
-            print(' '.join(cmds + extra_cmds), file=handler)
+            cmds.append('-renormalize')
+        extra_cmds = ['-data', 'iwslt2014/data.train',
+                      '-save_data', '{dir}/data.train'.format(dir=directory)]
+        print(' '.join(cmds + extra_cmds), file=handler)
+        # Make sure the validation data is teacher forcing.
+        for i in range(len(cmds)):
+            if i > 0 and cmds[i - 1] == '-explore_type':
+                cmds[i] = 'teacher_forcing'
+            if i > 0 and cmds[i - 1] == '-distill_alpha':
+                cmds[i] = '1'
+        extra_cmds = ['-data', 'iwslt2014/data.valid',
+                      '-save_data', '{dir}/data.valid'.format(dir=directory)]
+        print(' '.join(cmds + extra_cmds), file=handler)
 
     for optim in ('adam', 'sgd'):
         optim_cmds = ['-optim', optim]
