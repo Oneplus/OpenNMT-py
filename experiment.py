@@ -29,13 +29,6 @@ def main():
     else:
         models = './model/lstm.h256.seed*.pt'
 
-    cmds = []
-    # Generate scripts
-    if explore_type == 'teacher_forcing':
-        cmds.extend(['-distill_alpha', '{alpha}'.format(alpha=opts.alpha)])
-    elif explore_type == 'epsilon_greedy':
-        cmds.extend(['-epsilon_greedy_epsilon', '{epsilon}'.format(epsilon=epsilon)])
-
     with open(os.path.join(directory, 'generate.sh'), 'w') as handler:
         cmds = ['python', 'generate.py',
                 '-vocab', 'iwslt2014/data.vocab',
@@ -45,6 +38,12 @@ def main():
                 '-report_every', '1',
                 '-topk', '{k}'.format(k=opts.topk),
                 '-gpu', '0']
+        # Generate scripts
+        if explore_type == 'teacher_forcing':
+            cmds.extend(['-distill_alpha', '{alpha}'.format(alpha=opts.alpha)])
+        elif explore_type == 'epsilon_greedy':
+            cmds.extend(['-epsilon_greedy_epsilon', '{epsilon}'.format(epsilon=opts.epsilon)])
+
         if opts.renormalize:
             cmds = cmds + ['-renormalize']
         for fold in ('train', 'valid'):
