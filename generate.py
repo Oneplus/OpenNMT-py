@@ -119,7 +119,10 @@ def generate():
 
             if opt.explore_type == 'teacher_forcing':
                 output *= opt.distill_alpha
-                output[:, batch.tgt.data[step]] += 1. - opt.distill_alpha
+                ind = batch.tgt[step].data.view(-1, 1)
+                temp_output = output.gather(1, ind)
+                temp_output += (1 - opt.distill_alpha)
+                output.scatter_(1, ind, temp_output)
             distrib, indices = torch.topk(output, opt.topk)
             if opt.renormalize:
                 distrib = softmax(var(torch.log(distrib))).data
