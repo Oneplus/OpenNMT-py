@@ -98,6 +98,7 @@ def generate():
             context, dec_states = translator.init_decoder_state(batch, test_data)
             payloads.append((dec_states, context))
 
+        uniform_distrib = tt.FloatTensor([[1.] * opt.topk] * batch.batch_size)
         end_mask = tt.ByteTensor(batch.batch_size).fill_(0)
 
         # steps includes the <s> symbol
@@ -124,6 +125,8 @@ def generate():
                 temp_output += (1 - opt.distill_alpha)
                 output.scatter_(1, ind, temp_output)
             distrib, indices = torch.topk(output, opt.topk)
+            if opt.annealing != 1:
+                distrib.pow_(1. / opt.annealing)
             if opt.renormalize:
                 distrib = softmax(var(torch.log(distrib))).data
 
@@ -133,7 +136,10 @@ def generate():
             if opt.explore_type == 'teacher_forcing':
                 inp_tensor = batch.tgt[step].data.view(1, -1)
             elif opt.explore_type == 'epsilon_greedy':
-                pass
+                mask = (tt.rand(batch.batch_size, 1) > opt.epsilon_greedy_epsilon).long()
+                ind = torch.distributions.Categorical(uniform_distrib).sample().view(-1, 1)
+                inp_tensor = indices[:, 0].contiguous().view(-1, 1) * mask + indices.gather(1, ind) * (1 - mask)
+                inp_tensor = inp_tensor.view(1, -1)
             else:
                 ind = torch.distributions.Categorical(distrib).sample().view(-1, 1)
                 inp_tensor = indices.gather(1, ind).view(1, -1)
