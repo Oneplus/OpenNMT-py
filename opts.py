@@ -330,7 +330,8 @@ def _generate_opts(parser):
     parser.add_argument('-renormalize', default=False, action='store_true',
                         help='Do the renormalization.')
     parser.add_argument('-explore_type', default='teacher_forcing',
-                        help='Way of exploring, valid arguments: [teacher_forcing, boltzmann, epsilon_greedy]')
+                        choices=['teacher_forcing', 'boltzmann', 'epsilon_greedy'],
+                        help='Way of exploring, valid arguments')
     parser.add_argument('-distill_alpha', type=float, default=1.,
                         help='the alpha value in distillation, only available in teacher_forcing.')
     parser.add_argument('-boltzmann_temperature', type=float, default=1.,

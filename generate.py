@@ -69,6 +69,11 @@ def generate():
     translators = load_translators()
 
     test_data = torch.load(opt.data + '.pt')
+    for example in test_data.examples:
+        if 'selected_indices' in example.__dict__:
+            del example.selected_indices
+        if 'selected_distrib' in example.__dict__:
+            del example.selected_distrib
     fields = onmt.IO.ONMTDataset.load_fields(torch.load(opt.vocab + '.pt'))
     fields = dict([(k, f) for (k, f) in fields.items() if k in test_data.examples[0].__dict__])
 
@@ -136,7 +141,10 @@ def generate():
             if opt.explore_type == 'teacher_forcing':
                 inp_tensor = batch.tgt[step].data.view(1, -1)
             elif opt.explore_type == 'epsilon_greedy':
-                mask = (tt.rand(batch.batch_size, 1) > opt.epsilon_greedy_epsilon).long()
+                if opt.gpu >= 0:
+                    mask = (torch.rand(batch.batch_size, 1) > opt.epsilon_greedy_epsilon).long().cuda()
+                else:
+                    mask = (torch.rand(batch.batch_size, 1) > opt.epsilon_greedy_epsilon).long()
                 ind = torch.distributions.Categorical(uniform_distrib).sample().view(-1, 1)
                 inp_tensor = indices[:, 0].contiguous().view(-1, 1) * mask + indices.gather(1, ind) * (1 - mask)
                 inp_tensor = inp_tensor.view(1, -1)
