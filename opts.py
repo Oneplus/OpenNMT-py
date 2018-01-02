@@ -325,6 +325,8 @@ def _generate_opts(parser):
     parser.add_argument('-save_pad', required=True, help='The information of padding')
     parser.add_argument('-topk', default=10, type=int,
                         help='The number of top elements.')
+    parser.add_argument('-n_samples', default=1, type=int,
+                        help='Generate n samples for each of the data')
     parser.add_argument('-annealing', default=1, type=float,
                         help='The temperature for annealing the param.')
     parser.add_argument('-renormalize', default=False, action='store_true',

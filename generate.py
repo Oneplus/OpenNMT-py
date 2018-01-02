@@ -8,6 +8,7 @@ import onmt.IO
 import opts
 import torch
 from torch.autograd import Variable
+import torchtext
 import glob
 import itertools
 
@@ -60,6 +61,25 @@ def load_translators():
     return translators
 
 
+def augment(test_data):
+    if opt.n_samples <= 1:
+        return
+
+    indices = 0
+    for example in test_data.examples:
+        indices = max(indices, example.indices)
+    new_examples = []
+    keys = test_data.examples[0].__dict__.keys()
+    fields = [(k, test_data.fields[k]) for k in list(keys)]
+    indices += 1
+    for i in range(1, opt.n_samples):
+        for ex in test_data.examples:
+            new_examples.append(torchtext.data.Example.fromlist(
+                [getattr(ex, k) for k in keys if k != 'indices'] + [indices], fields))
+            indices += 1
+    test_data.examples.extend(new_examples)
+
+
 def generate():
     opt.cuda = opt.gpu > -1
     if opt.cuda:
@@ -78,6 +98,7 @@ def generate():
     fields = dict([(k, f) for (k, f) in fields.items() if k in test_data.examples[0].__dict__])
 
     test_data.fields = fields
+    augment(test_data)
     test_iter = onmt.IO.OrderedIterator(
         dataset=test_data, batch_size=opt.batch_size,
         device=opt.gpu,
