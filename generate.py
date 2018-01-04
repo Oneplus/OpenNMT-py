@@ -150,9 +150,11 @@ def generate():
                 temp_output = output.gather(1, ind)
                 temp_output += (1 - opt.distill_alpha)
                 output.scatter_(1, ind, temp_output)
-            distrib, indices = torch.topk(output, opt.topk)
             if opt.annealing != 1:
                 distrib.pow_(1. / opt.annealing)
+                distrib.div_(distrib.sum(dim=1).view(-1, 1).expand_as(distrib))
+
+            distrib, indices = torch.topk(output, opt.topk)
             if opt.renormalize:
                 distrib = softmax(var(torch.log(distrib))).data
 
