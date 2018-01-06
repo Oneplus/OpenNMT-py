@@ -43,6 +43,7 @@ def main():
                 '-report_every', '1',
                 '-topk', '{k}'.format(k=opts.topk),
                 '-annealing', str(opts.anneal),
+                '-max-sent-length', '50',
                 '-gpu', '0']
         # Generate scripts
         if opts.explore_type == 'teacher_forcing':
