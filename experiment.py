@@ -10,7 +10,7 @@ def main():
     cmd.add_argument('-anneal', default=1., type=float, help='the annealing parameter')
     cmd.add_argument('-alpha', default=1., help='the alpha, only used when explore_type=teacher forcing.')
     cmd.add_argument('-epsilon', default=0, help='the epsilon in the e-greedy')
-    cmd.add_argument('-temperature', defautl=1, type=float, help='the temperature in boltzmann')
+    cmd.add_argument('-temperature', default=1, type=float, help='the temperature in boltzmann')
     cmd.add_argument('-topk', required=True, type=int, help='the number of k-best')
     cmd.add_argument('-renormalize', default=False, action='store_true', help='do re-normalize.')
     cmd.add_argument('-seed', default=1, help='the seed')

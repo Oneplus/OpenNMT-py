@@ -150,9 +150,13 @@ def generate():
                 temp_output = output.gather(1, ind)
                 temp_output += (1 - opt.distill_alpha)
                 output.scatter_(1, ind, temp_output)
+
+            if opt.explore_type == 'boltzmann':
+                output_clone = output.clone()
+
             if opt.annealing != 1:
-                distrib.pow_(1. / opt.annealing)
-                distrib.div_(distrib.sum(dim=1).view(-1, 1).expand_as(distrib))
+                output.pow_(1. / opt.annealing)
+                output.div_(output.sum(dim=1).view(-1, 1).expand_as(output))
 
             distrib, indices = torch.topk(output, opt.topk)
             if opt.renormalize:
@@ -172,8 +176,11 @@ def generate():
                 inp_tensor = indices[:, 0].contiguous().view(-1, 1) * mask + indices.gather(1, ind) * (1 - mask)
                 inp_tensor = inp_tensor.view(1, -1)
             else:
-                ind = torch.distributions.Categorical(distrib).sample().view(-1, 1)
-                inp_tensor = indices.gather(1, ind).view(1, -1)
+                if opt.boltzmann_temperature != 1.:
+                    output_clone.pow_(1. / opt.boltzmann_temperature)
+                    output_clone.div_(output_clone.sum(dim=1).view(-1, 1).expand_as(output_clone))
+                ind = torch.distributions.Categorical(output_clone).sample().view(-1, 1)
+                inp_tensor = ind.view(1, -1)
 
             inp_tensor.masked_fill_(end_mask, eos_id)
             end_mask = (inp_tensor == eos_id)
