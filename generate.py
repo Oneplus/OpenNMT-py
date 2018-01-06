@@ -124,7 +124,7 @@ def generate():
             context, dec_states = translator.init_decoder_state(batch, test_data)
             payloads.append((dec_states, context))
 
-        uniform_distrib = tt.FloatTensor([[1.] * opt.topk] * batch.batch_size)
+        uniform_distrib = tt.FloatTensor([[1.] * len(tgt_vocab.itos)] * batch.batch_size)
         end_mask = tt.ByteTensor(batch.batch_size).fill_(0)
 
         # steps includes the <s> symbol
@@ -224,7 +224,7 @@ def generate():
             effective_steps = list(itertools.takewhile(lambda s: tgt[s][b] != eos_id, range(n_steps)))
             test_data.examples[i].tgt = tuple([tgt_vocab.itos[tgt[step][b]] for step in effective_steps])
 
-            effective_steps = effective_steps + [effective_steps[-1] + 1]
+            effective_steps = effective_steps + [(effective_steps[-1] if len(effective_steps) > 0 else 0) + 1]
             test_data.examples[i].selected_distrib = [selected_distrib[step][b].tolist() for step in effective_steps]
             test_data.examples[i].selected_indices = [selected_indices[step][b].tolist() for step in effective_steps]
 
