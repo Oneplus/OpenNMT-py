@@ -173,7 +173,7 @@ def generate():
                 else:
                     mask = (torch.rand(batch.batch_size, 1) > opt.epsilon_greedy_epsilon).long()
                 ind = torch.distributions.Categorical(uniform_distrib).sample().view(-1, 1)
-                inp_tensor = indices[:, 0].contiguous().view(-1, 1) * mask + indices.gather(1, ind) * (1 - mask)
+                inp_tensor = indices[:, 0].contiguous().view(-1, 1) * mask + ind * (1 - mask)
                 inp_tensor = inp_tensor.view(1, -1)
             else:
                 if opt.boltzmann_temperature != 1.:
